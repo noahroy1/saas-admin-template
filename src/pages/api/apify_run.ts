@@ -24,7 +24,7 @@ export async function POST({ locals, request }) {
   // Optimized Apify input: Minimal profile scrape, no posts
   const apifyInput = {
     search: username,
-    searchType: "profile",
+    searchType: "user",
     searchLimit: 1, // Single match
     resultsType: "details", // Full profile metadata
     resultsLimit: 1, // Skip posts to minimize time/cost
