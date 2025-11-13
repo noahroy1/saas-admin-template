@@ -35,8 +35,9 @@ export async function POST({ locals, request }) {
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${APIFY_TOKEN}`,
-        "Content-Type": "application/json",
+        "Content-Type", "application/json",
+        "Accept", "application/json",
+        "Authorization", `"Bearer ${APIFY_TOKEN}"`
       },
       body: JSON.stringify(apifyInput),
     }
