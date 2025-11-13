@@ -1,7 +1,7 @@
 import { validateApiTokenResponse } from "@/lib/api";
 
 export async function POST({ locals, request }) {
-  const { API_TOKEN, APIFY_TOKEN } = locals.runtime.env; // DB not needed here, but available if you extend for logging
+  const { API_TOKEN, APIFY_TOKEN } = locals.runtime.env; // DB for optional caching/logging
 
   const invalidTokenResponse = await validateApiTokenResponse(
     request,
@@ -21,23 +21,24 @@ export async function POST({ locals, request }) {
     return Response.json({ error: "Missing or invalid username" }, { status: 400 });
   }
 
-  // Apify input: Scrape X profile for the given username (e.g., https://x.com/grok)
+  // Optimized Apify input: Minimal profile scrape, no posts
   const apifyInput = {
-    startUrls: [`https://instagram.com/${username}`],
-    proxy: { useApifyProxy: true }, // Required for reliable scraping; uses your Apify account's proxy
-    addUserInfo: true, // Optional: Enrich tweets with user metadata
-    // Extend here: e.g., onlyUserInfo: true for profile-only (faster)
+    search: username,
+    searchType: "profile",
+    searchLimit: 1, // Single match
+    resultsType: "details", // Full profile metadata
+    resultsLimit: 0, // Skip posts to minimize time/cost
+    proxy: { useApifyProxy: true }, // Anti-block essential
   };
 
-  // Step 1: Run the Apify actor
+  // Step 1: Run the actor
   const apifyResponse = await fetch(
     "https://api.apify.com/v2/acts/apify~instagram-scraper/runs",
     {
       method: "POST",
       headers: {
-        "Content-Type", "application/json",
-        "Accept", "application/json",
-        "Authorization", `Bearer ${APIFY_TOKEN}`
+        Authorization: `Bearer ${APIFY_TOKEN}`,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(apifyInput),
     }
@@ -54,9 +55,9 @@ export async function POST({ locals, request }) {
   const runData = await apifyResponse.json();
   const runId = runData.data.id;
 
-  // Step 2: Poll for completion (5s intervals, max ~5 mins)
+  // Step 2: Poll for completion (5s intervals, max ~2 mins for light runs)
   let status = "RUNNING";
-  let maxAttempts = 60;
+  let maxAttempts = 24; // Reduced for faster fails on minimal scrapes
   while (status === "RUNNING" && maxAttempts-- > 0) {
     await new Promise((resolve) => setTimeout(resolve, 5000));
     const statusRes = await fetch(
@@ -73,7 +74,7 @@ export async function POST({ locals, request }) {
     return Response.json({ error: `Run failed with status: ${status}` }, { status: 500 });
   }
 
-  // Step 3: Fetch results from dataset
+  // Step 3: Fetch minimal results
   const resultsRes = await fetch(
     `https://api.apify.com/v2/datasets/${runData.data.defaultDatasetId}/items`,
     {
@@ -85,10 +86,22 @@ export async function POST({ locals, request }) {
   }
   const results = await resultsRes.json();
 
-  // Optional: Log to D1 for admin visibility (uncomment if DB bound)
-  // await DB.prepare("INSERT INTO apify_runs (username, run_id, results_count) VALUES (?, ?, ?)")
-  //   .bind(username, runId, results.length)
-  //   .run();
+  if (!results || results.length === 0) {
+    return Response.json({ error: "No profile found for username" }, { status: 404 });
+  }
 
-  return Response.json({ success: true, runId, results }, { status: 200 });
+  // Step 4: Extract essentials (use HD pic for quality)
+  const profile = results[0];
+  const extracted = {
+    username: profile.username,
+    profilePicture: profile.profilePicUrlHD || profile.profilePicUrl, // Fallback to low-res
+    followersCount: profile.followersCount,
+    restricted: profile.private || false, // Insight flag for partial data
+  };
+
+  // Optional: Cache in D1 (uncomment for prod)
+  // await DB.prepare("INSERT OR REPLACE INTO instagram_cache (username, data, timestamp) VALUES (?, ?, ?)")
+  //   .bind(username, JSON.stringify(extracted), Date.now()).run();
+
+  return Response.json({ success: true, data: extracted }, { status: 200 });
 }
