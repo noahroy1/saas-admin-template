@@ -1,24 +1,43 @@
 import { validateApiTokenResponse } from "@/lib/api";
 
-export async function POST({ locals, request }) {
-  const { API_TOKEN, APIFY_TOKEN } = locals.runtime.env; // DB for optional caching/logging
+// CORS headers constant for reuse
+const corsHeaders = {
+  'Access-Control-Allow-Origin': 'https://fulfilled-tasks-456737.framer.app',  // Dev wildcard; prod: 'https://*.framer.app' or your domain
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+};
 
-  const invalidTokenResponse = await validateApiTokenResponse(
-    request,
-    API_TOKEN,
-  );
-  if (invalidTokenResponse) return invalidTokenResponse;
+export async function OPTIONS() {
+  return new Response(null, { headers: corsHeaders });  // Handles preflight
+}
+
+export async function POST({ locals, request }) {
+  const { API_TOKEN, APIFY_TOKEN } = locals.runtime.env;
+
+  const invalidTokenResponse = await validateApiTokenResponse(request, API_TOKEN);
+  if (invalidTokenResponse) {
+    return new Response(invalidTokenResponse.body, { 
+      status: invalidTokenResponse.status, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
+  }
 
   let body;
   try {
     body = await request.json();
   } catch {
-    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), { 
+      status: 400, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
   }
 
   const { username } = body;
   if (!username || typeof username !== "string") {
-    return Response.json({ error: "Missing or invalid username" }, { status: 400 });
+    return new Response(JSON.stringify({ error: "Missing or invalid username" }), { 
+      status: 400, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
   }
 
   // Optimized Apify input: Minimal profile scrape, no posts
@@ -103,5 +122,11 @@ export async function POST({ locals, request }) {
   // await DB.prepare("INSERT OR REPLACE INTO instagram_cache (username, data, timestamp) VALUES (?, ?, ?)")
   //   .bind(username, JSON.stringify(extracted), Date.now()).run();
 
-  return Response.json({ success: true, data: extracted }, { status: 200 });
+// In success return
+  return new Response(JSON.stringify({ success: true, data: extracted }), { 
+    status: 200, 
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+  });
+
+  // In error returns, add similar headers (e.g., for run failed, fetch failed)
 }
