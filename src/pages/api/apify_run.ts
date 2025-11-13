@@ -27,7 +27,7 @@ export async function POST({ locals, request }) {
     searchType: "profile",
     searchLimit: 1, // Single match
     resultsType: "details", // Full profile metadata
-    resultsLimit: 0, // Skip posts to minimize time/cost
+    resultsLimit: 1, // Skip posts to minimize time/cost
     proxy: { useApifyProxy: true }, // Anti-block essential
   };
 
