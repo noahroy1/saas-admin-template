@@ -2,9 +2,10 @@ import { validateApiTokenResponse } from "@/lib/api";
 
 // CORS headers constant for reuse
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://fulfilled-tasks-456737.framer.app',  // Dev wildcard; prod: 'https://*.framer.app' or your domain
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Origin': '*',  // Or 'https://*.framer.app' for prod tighten
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+  'Vary': 'Origin',  // Busts caches on origin changes
 };
 
 export async function OPTIONS() {
@@ -127,6 +128,4 @@ export async function POST({ locals, request }) {
     status: 200, 
     headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
   });
-
-  // In error returns, add similar headers (e.g., for run failed, fetch failed)
 }
