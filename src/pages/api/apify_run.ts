@@ -2,14 +2,14 @@ import { validateApiTokenResponse } from "@/lib/api";
 
 // Helper for CORS Responses
 function createCorsResponse(body, status, request) {
-  console.log("createCorsResponse called - request present:", !!request); // Debug: Tail to confirm param
-  const origin = request?.headers?.get('Origin') || 'https://fulfilled-tasks-456737.framer.app'; // Null-safe + fallback
+  console.log("createCorsResponse called - request present:", !!request); // Debug: Confirm param
+  const origin = request?.headers?.get('Origin') || 'https://fulfilled-tasks-456737.framer.app'; // Null-safe fallback
   const corsHeaders = {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Allow-Credentials': 'true',
-    'Vary': 'Origin', // For caching
+    'Vary': 'Origin',
     'Content-Type': 'application/json',
   };
   console.log(`Response origin set to: ${origin}`); // Log for tail
@@ -18,7 +18,7 @@ function createCorsResponse(body, status, request) {
 
 export async function OPTIONS({ request }) {
   console.log("OPTIONS called - origin:", request?.headers?.get('Origin')); // Debug: Trace preflight
-  return createCorsResponse(null, 204, request); // Preflight with dynamic origin
+  return createCorsResponse(null, 204, request); // Preflight success
 }
 
 export async function POST({ locals, request }) {
