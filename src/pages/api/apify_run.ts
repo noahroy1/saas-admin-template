@@ -2,12 +2,13 @@ import { validateApiTokenResponse } from "@/lib/api";
 
 // CORS headers constant for reuse
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://fulfilled-tasks-456737.framer.app',  // Echo request origin for precision
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-  'Access-Control-Allow-Credentials': 'true',  // If auth evolves to cookies
-  // 'Vary': 'Origin',
-};
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Credentials': 'true',
+    'Vary': 'Origin', // Busts caches
+    'Content-Type': 'application/json',
+  };
 
 export async function OPTIONS() {
   return new Response(null, { headers: corsHeaders });  // Handles preflight
