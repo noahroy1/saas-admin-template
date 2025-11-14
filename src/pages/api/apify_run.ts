@@ -43,12 +43,12 @@ export async function POST({ locals, request }) {
     });
   }
 
-  // Optimized Apify input: Minimal profile scrape, no posts
+  // Optimized Apify input: Minimal profile scrape, no posts (reverted to originals per schema)
   const apifyInput = {
     search: username,
-    searchType: "user",
+    searchType: "user", // Confirmed valid per schema
     searchLimit: 1, // Single match
-    resultsType: "details", // Full profile metadata
+    resultsType: "details", // Confirmed valid per schema
     resultsLimit: 1, // Skip posts to minimize time/cost
     proxy: { useApifyProxy: true }, // Anti-block essential
   };
@@ -77,19 +77,26 @@ export async function POST({ locals, request }) {
   const runData = await apifyResponse.json();
   const runId = runData.data.id;
 
-  // Step 2: Poll for completion (5s intervals, max ~2 mins for light runs)
+  // Step 2: Poll for completion (5s intervals, increased max to 5 mins for delays)
   let status = "RUNNING";
-  let maxAttempts = 24; // Reduced for faster fails on minimal scrapes
+  let maxAttempts = 60; // Increased to handle variable scrape times
   while (status === "RUNNING" && maxAttempts-- > 0) {
     await new Promise((resolve) => setTimeout(resolve, 5000));
-    const statusRes = await fetch(
-      `https://api.apify.com/v2/actor-runs/${runId}`,
-      {
-        headers: { Authorization: `Bearer ${APIFY_TOKEN}` },
+    try {
+      const statusRes = await fetch(
+        `https://api.apify.com/v2/actor-runs/${runId}`,
+        {
+          headers: { Authorization: `Bearer ${APIFY_TOKEN}` },
+        }
+      );
+      if (!statusRes.ok) {
+        throw new Error(`Status check failed: ${statusRes.status}`);
       }
-    );
-    const statusData = await statusRes.json();
-    status = statusData.data.status;
+      const statusData = await statusRes.json();
+      status = statusData.data.status;
+    } catch (err) {
+      return Response.json({ error: `Polling error: ${err.message}` }, { status: 500, headers: jsonHeaders });
+    }
   }
 
   if (status !== "SUCCEEDED") {
@@ -97,34 +104,38 @@ export async function POST({ locals, request }) {
   }
 
   // Step 3: Fetch minimal results
-  const resultsRes = await fetch(
-    `https://api.apify.com/v2/datasets/${runData.data.defaultDatasetId}/items`,
-    {
-      headers: { Authorization: `Bearer ${APIFY_TOKEN}` },
+  try {
+    const resultsRes = await fetch(
+      `https://api.apify.com/v2/datasets/${runData.data.defaultDatasetId}/items`,
+      {
+        headers: { Authorization: `Bearer ${APIFY_TOKEN}` },
+      }
+    );
+    if (!resultsRes.ok) {
+      return Response.json({ error: `Failed to fetch results: ${resultsRes.status}` }, { status: 500, headers: jsonHeaders });
     }
-  );
-  if (!resultsRes.ok) {
-    return Response.json({ error: "Failed to fetch results" }, { status: 500, headers: jsonHeaders });
+    const results = await resultsRes.json();
+
+    if (!results || results.length === 0) {
+      return Response.json({ error: "No profile found for username" }, { status: 404, headers: jsonHeaders });
+    }
+
+    // Step 4: Extract essentials (use HD pic for quality)
+    const profile = results[0];
+    const extracted = {
+      username: profile.username,
+      profilePicture: profile.profilePicUrlHD || profile.profilePicUrl, // Fallback to low-res
+      followersCount: profile.followersCount,
+      restricted: profile.private || false, // Insight flag for partial data
+    };
+
+    // Optional: Cache in D1 (uncomment for prod)
+    // await DB.prepare("INSERT OR REPLACE INTO instagram_cache (username, data, timestamp) VALUES (?, ?, ?)")
+    //   .bind(username, JSON.stringify(extracted), Date.now()).run();
+
+    // In success return
+    return Response.json({ success: true, data: extracted }, { status: 200, headers: jsonHeaders });
+  } catch (err) {
+    return Response.json({ error: `Results processing error: ${err.message}` }, { status: 500, headers: jsonHeaders });
   }
-  const results = await resultsRes.json();
-
-  if (!results || results.length === 0) {
-    return Response.json({ error: "No profile found for username" }, { status: 404, headers: jsonHeaders });
-  }
-
-  // Step 4: Extract essentials (use HD pic for quality)
-  const profile = results[0];
-  const extracted = {
-    username: profile.username,
-    profilePicture: profile.profilePicUrlHD || profile.profilePicUrl, // Fallback to low-res
-    followersCount: profile.followersCount,
-    restricted: profile.private || false, // Insight flag for partial data
-  };
-
-  // Optional: Cache in D1 (uncomment for prod)
-  // await DB.prepare("INSERT OR REPLACE INTO instagram_cache (username, data, timestamp) VALUES (?, ?, ?)")
-  //   .bind(username, JSON.stringify(extracted), Date.now()).run();
-
-  // In success return
-  return Response.json({ success: true, data: extracted }, { status: 200, headers: jsonHeaders });
 }
