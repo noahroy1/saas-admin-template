@@ -2,7 +2,7 @@ import { validateApiTokenResponse } from "@/lib/api";
 
 // CORS headers constant for reuse
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://fulfilled-tasks-456737.framer.app',  // for prod tighten
+  'Access-Control-Allow-Origin': 'https://fulfilled-tasks-456737.framer.app/lead',  // for prod tighten
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type',
   'Vary': 'Origin',  // Busts caches on origin changes
