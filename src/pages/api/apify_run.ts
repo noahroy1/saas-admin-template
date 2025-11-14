@@ -77,9 +77,10 @@ export async function POST({ locals, request }) {
 
   // Step 2: Poll for completion (5s intervals, max ~2 mins for light runs)
   let status = "RUNNING";
-  let maxAttempts = 24; // Reduced for faster fails on minimal scrapes
+  let maxAttempts = 20; // ~40s cap (lighter loads)
   while (status === "RUNNING" && maxAttempts-- > 0) {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await new Promise((resolve) => setTimeout(resolve, 2000)); // Poll every 2s
+    try {
     const statusRes = await fetch(
       `https://api.apify.com/v2/actor-runs/${runId}`,
       {
@@ -88,6 +89,9 @@ export async function POST({ locals, request }) {
     );
     const statusData = await statusRes.json();
     status = statusData.data.status;
+  } catch (err) {
+    console.error("Status fetch error:", err);  // Log for Workers tail (e.g., wrangler tail to trace)
+    await new Promise((resolve) => setTimeout(resolve, 3000));  // Backoff to 3s on error to avoid rate-limits
   }
 
   if (status !== "SUCCEEDED") {
