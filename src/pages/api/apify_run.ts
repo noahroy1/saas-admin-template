@@ -1,7 +1,9 @@
 import { validateApiTokenResponse } from "@/lib/api";
 
-// CORS headers constant for reuse
-const corsHeaders = {
+// Helper to create Response with CORS
+function createCorsResponse(body, status, request) {
+  const origin = request.headers.get('Origin') || '*'; // Echo for precision; fallback wildcard
+  const corsHeaders = {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
@@ -9,9 +11,12 @@ const corsHeaders = {
     'Vary': 'Origin', // Busts caches
     'Content-Type': 'application/json',
   };
+  console.log(`Serving response with origin: ${origin}`); // Log for wrangler tail
+  return new Response(JSON.stringify(body), { status, headers: corsHeaders });
+}
 
-export async function OPTIONS() {
-  return new Response(null, { headers: corsHeaders });  // Handles preflight
+export async function OPTIONS(request) {
+  return createCorsResponse(null, 204, request); // Preflight success
 }
 
 export async function POST({ locals, request }) {
@@ -19,28 +24,19 @@ export async function POST({ locals, request }) {
 
   const invalidTokenResponse = await validateApiTokenResponse(request, API_TOKEN);
   if (invalidTokenResponse) {
-    return new Response(invalidTokenResponse.body, { 
-      status: invalidTokenResponse.status, 
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-    });
+    return createCorsResponse({ error: "Invalid token" }, invalidTokenResponse.status, request);
   }
 
   let body;
   try {
     body = await request.json();
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), { 
-      status: 400, 
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-    });
+    return createCorsResponse({ error: "Invalid JSON body" }, 400, request);
   }
 
   const { username } = body;
   if (!username || typeof username !== "string") {
-    return new Response(JSON.stringify({ error: "Missing or invalid username" }), { 
-      status: 400, 
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-    });
+    return createCorsResponse({ error: "Missing or invalid username" }, 400, request);
   }
 
   // Optimized Apify input: Minimal profile scrape, no posts
@@ -68,37 +64,34 @@ export async function POST({ locals, request }) {
 
   if (!apifyResponse.ok) {
     const errorData = await apifyResponse.json();
-    return Response.json(
-      { error: errorData.error?.message || "Apify run failed" },
-      { status: apifyResponse.status }
-    );
+    return createCorsResponse({ error: errorData.error?.message || "Apify run failed" }, apifyResponse.status, request);
   }
 
   const runData = await apifyResponse.json();
   const runId = runData.data.id;
 
-  // Step 2: Poll for completion (5s intervals, max ~2 mins for light runs)
+  // Step 2: Poll for completion (2s intervals, max ~40s for light runs)
   let status = "RUNNING";
-  let maxAttempts = 24; // Reduced for faster fails on minimal scrapes
+  let maxAttempts = 20; // ~40s cap (lighter loads)
   while (status === "RUNNING" && maxAttempts-- > 0) {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 2000)); // Poll every 2s
     try {
       const statusRes = await fetch(
-      `https://api.apify.com/v2/actor-runs/${runId}`,
-      {
-        headers: { Authorization: `Bearer ${APIFY_TOKEN}` },
-      }
-    );
-    const statusData = await statusRes.json();
-    status = statusData.data.status;
+        `https://api.apify.com/v2/actor-runs/${runId}`,
+        {
+          headers: { Authorization: `Bearer ${APIFY_TOKEN}` },
+        }
+      );
+      const statusData = await statusRes.json();
+      status = statusData.data.status;
     } catch (err) {
-      console.error("Status fetch error:", err);  // Log for Workers tail (e.g., wrangler tail to trace)
-      await new Promise((resolve) => setTimeout(resolve, 3000));  // Backoff to 3s on error to avoid rate-limits
+      console.error("Status fetch error:", err); // Log for Workers tail
+      await new Promise((resolve) => setTimeout(resolve, 3000)); // Backoff to 3s
     }
   }
 
   if (status !== "SUCCEEDED") {
-    return Response.json({ error: `Run failed with status: ${status}` }, { status: 500 });
+    return createCorsResponse({ error: `Run failed with status: ${status}` }, 500, request);
   }
 
   // Step 3: Fetch minimal results
@@ -108,13 +101,15 @@ export async function POST({ locals, request }) {
       headers: { Authorization: `Bearer ${APIFY_TOKEN}` },
     }
   );
+
   if (!resultsRes.ok) {
-    return Response.json({ error: "Failed to fetch results" }, { status: 500 });
+    return createCorsResponse({ error: "Failed to fetch results" }, 500, request);
   }
+
   const results = await resultsRes.json();
 
   if (!results || results.length === 0) {
-    return Response.json({ error: "No profile found for username" }, { status: 404 });
+    return createCorsResponse({ error: "No profile found for username" }, 404, request);
   }
 
   // Step 4: Extract essentials (use HD pic for quality)
@@ -130,9 +125,5 @@ export async function POST({ locals, request }) {
   // await DB.prepare("INSERT OR REPLACE INTO instagram_cache (username, data, timestamp) VALUES (?, ?, ?)")
   //   .bind(username, JSON.stringify(extracted), Date.now()).run();
 
-// In success return
-  return new Response(JSON.stringify({ success: true, data: extracted }), { 
-    status: 200, 
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-  });
+  return createCorsResponse({ success: true, data: extracted }, 200, request);
 }
