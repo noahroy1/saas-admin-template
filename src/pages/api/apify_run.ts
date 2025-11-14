@@ -1,12 +1,13 @@
 import { validateApiTokenResponse } from "@/lib/api";
 
 // CORS headers constant for reuse
-const corsHeaders = {
-  'Access-Control-Allow-Origin': origin || "*",  // Or 'https://*.framer.app' for prod tighten
+const corsHeaders = (origin) => ({
+  'Access-Control-Allow-Origin': origin || '*',  // Echo request origin for precision
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-  'Vary': 'Origin',  // Busts caches on origin changes
-};
+  'Access-Control-Allow-Credentials': 'true',  // If auth evolves to cookies
+  'Vary': 'Origin',
+});
 
 export async function OPTIONS() {
   return new Response(null, { headers: corsHeaders });  // Handles preflight
