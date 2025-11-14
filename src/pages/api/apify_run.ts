@@ -2,24 +2,27 @@ import { validateApiTokenResponse } from "@/lib/api";
 
 // Helper for CORS Responses
 function createCorsResponse(body, status, request) {
-  const origin = request.headers.get('Origin') || 'https://fulfilled-tasks-456737.framer.app'; // Echo or fallback
+  console.log("createCorsResponse called with request:", !!request); // Debug: Confirm param presence
+  const origin = request?.headers?.get('Origin') || 'https://fulfilled-tasks-456737.framer.app'; // Null-safe + fallback
   const corsHeaders = {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Allow-Credentials': 'true',
-    'Vary': 'Origin', // Essential for caching
+    'Vary': 'Origin', // For caching
     'Content-Type': 'application/json',
   };
-  console.log(`Response origin set to: ${origin}`); // Log for tail debugging
+  console.log(`Response origin set to: ${origin}`); // Log for tail
   return new Response(body ? JSON.stringify(body) : null, { status, headers: corsHeaders });
 }
 
 export async function OPTIONS({ request }) {
+  console.log("OPTIONS handler called with origin:", request.headers.get('Origin')); // Debug: Trace preflight
   return createCorsResponse(null, 204, request); // Preflight with dynamic origin
 }
 
 export async function POST({ locals, request }) {
+  console.log("POST handler called with origin:", request.headers.get('Origin')); // Debug: Trace main request
   const { API_TOKEN, APIFY_TOKEN } = locals.runtime.env;
 
   const invalidTokenResponse = await validateApiTokenResponse(request, API_TOKEN);
