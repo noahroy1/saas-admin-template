@@ -8,6 +8,8 @@ const corsHeaders = {
   'Vary': 'Origin',  // Busts caches on origin changes
 };
 
+const jsonHeaders = { ...corsHeaders, 'Content-Type': 'application/json' };
+
 export async function OPTIONS() {
   return new Response(null, { headers: corsHeaders });  // Handles preflight
 }
@@ -19,7 +21,7 @@ export async function POST({ locals, request }) {
   if (invalidTokenResponse) {
     return new Response(invalidTokenResponse.body, { 
       status: invalidTokenResponse.status, 
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      headers: jsonHeaders
     });
   }
 
@@ -29,7 +31,7 @@ export async function POST({ locals, request }) {
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), { 
       status: 400, 
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      headers: jsonHeaders
     });
   }
 
@@ -37,7 +39,7 @@ export async function POST({ locals, request }) {
   if (!username || typeof username !== "string") {
     return new Response(JSON.stringify({ error: "Missing or invalid username" }), { 
       status: 400, 
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      headers: jsonHeaders
     });
   }
 
@@ -68,7 +70,7 @@ export async function POST({ locals, request }) {
     const errorData = await apifyResponse.json();
     return Response.json(
       { error: errorData.error?.message || "Apify run failed" },
-      { status: apifyResponse.status }
+      { status: apifyResponse.status, headers: jsonHeaders }
     );
   }
 
@@ -91,7 +93,7 @@ export async function POST({ locals, request }) {
   }
 
   if (status !== "SUCCEEDED") {
-    return Response.json({ error: `Run failed with status: ${status}` }, { status: 500 });
+    return Response.json({ error: `Run failed with status: ${status}` }, { status: 500, headers: jsonHeaders });
   }
 
   // Step 3: Fetch minimal results
@@ -102,12 +104,12 @@ export async function POST({ locals, request }) {
     }
   );
   if (!resultsRes.ok) {
-    return Response.json({ error: "Failed to fetch results" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch results" }, { status: 500, headers: jsonHeaders });
   }
   const results = await resultsRes.json();
 
   if (!results || results.length === 0) {
-    return Response.json({ error: "No profile found for username" }, { status: 404 });
+    return Response.json({ error: "No profile found for username" }, { status: 404, headers: jsonHeaders });
   }
 
   // Step 4: Extract essentials (use HD pic for quality)
@@ -123,9 +125,6 @@ export async function POST({ locals, request }) {
   // await DB.prepare("INSERT OR REPLACE INTO instagram_cache (username, data, timestamp) VALUES (?, ?, ?)")
   //   .bind(username, JSON.stringify(extracted), Date.now()).run();
 
-// In success return
-  return new Response(JSON.stringify({ success: true, data: extracted }), { 
-    status: 200, 
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-  });
+  // In success return
+  return Response.json({ success: true, data: extracted }, { status: 200, headers: jsonHeaders });
 }
