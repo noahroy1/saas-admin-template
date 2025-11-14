@@ -1,22 +1,22 @@
 import { validateApiTokenResponse } from "@/lib/api";
 
-// Helper to create Response with CORS
+// Helper for CORS Responses
 function createCorsResponse(body, status, request) {
-  const origin = request.headers.get('Origin') || '*'; // Echo for precision; fallback wildcard
+  const origin = request.headers.get('Origin') || 'https://fulfilled-tasks-456737.framer.app'; // Echo or fallback
   const corsHeaders = {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Allow-Credentials': 'true',
-    'Vary': 'Origin', // Busts caches
+    'Vary': 'Origin', // Essential for caching
     'Content-Type': 'application/json',
   };
-  console.log(`Serving response with origin: ${origin}`); // Log for wrangler tail
-  return new Response(JSON.stringify(body), { status, headers: corsHeaders });
+  console.log(`Response origin set to: ${origin}`); // Log for tail debugging
+  return new Response(body ? JSON.stringify(body) : null, { status, headers: corsHeaders });
 }
 
-export async function OPTIONS(request) {
-  return createCorsResponse(null, 204, request); // Preflight success
+export async function OPTIONS({ request }) {
+  return createCorsResponse(null, 204, request); // Preflight with dynamic origin
 }
 
 export async function POST({ locals, request }) {
@@ -43,13 +43,12 @@ export async function POST({ locals, request }) {
   const apifyInput = {
     search: username,
     searchType: "user",
-    searchLimit: 1, // Single match
-    resultsType: "details", // Full profile metadata
-    resultsLimit: 1, // Skip posts to minimize time/cost
-    proxy: { useApifyProxy: true }, // Anti-block essential
+    searchLimit: 1,
+    resultsType: "details",
+    resultsLimit: 1,
+    proxy: { useApifyProxy: true },
   };
 
-  // Step 1: Run the actor
   const apifyResponse = await fetch(
     "https://api.apify.com/v2/acts/apify~instagram-scraper/runs",
     {
@@ -70,11 +69,11 @@ export async function POST({ locals, request }) {
   const runData = await apifyResponse.json();
   const runId = runData.data.id;
 
-  // Step 2: Poll for completion (2s intervals, max ~40s for light runs)
+  // Step 2: Poll for completion (2s intervals, max ~40s)
   let status = "RUNNING";
-  let maxAttempts = 20; // ~40s cap (lighter loads)
+  let maxAttempts = 20;
   while (status === "RUNNING" && maxAttempts-- > 0) {
-    await new Promise((resolve) => setTimeout(resolve, 2000)); // Poll every 2s
+    await new Promise((resolve) => setTimeout(resolve, 2000));
     try {
       const statusRes = await fetch(
         `https://api.apify.com/v2/actor-runs/${runId}`,
@@ -85,8 +84,8 @@ export async function POST({ locals, request }) {
       const statusData = await statusRes.json();
       status = statusData.data.status;
     } catch (err) {
-      console.error("Status fetch error:", err); // Log for Workers tail
-      await new Promise((resolve) => setTimeout(resolve, 3000)); // Backoff to 3s
+      console.error("Status fetch error:", err);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
     }
   }
 
@@ -94,7 +93,6 @@ export async function POST({ locals, request }) {
     return createCorsResponse({ error: `Run failed with status: ${status}` }, 500, request);
   }
 
-  // Step 3: Fetch minimal results
   const resultsRes = await fetch(
     `https://api.apify.com/v2/datasets/${runData.data.defaultDatasetId}/items`,
     {
@@ -112,18 +110,13 @@ export async function POST({ locals, request }) {
     return createCorsResponse({ error: "No profile found for username" }, 404, request);
   }
 
-  // Step 4: Extract essentials (use HD pic for quality)
   const profile = results[0];
   const extracted = {
     username: profile.username,
-    profilePicture: profile.profilePicUrlHD || profile.profilePicUrl, // Fallback to low-res
+    profilePicture: profile.profilePicUrlHD || profile.profilePicUrl,
     followersCount: profile.followersCount,
-    restricted: profile.private || false, // Insight flag for partial data
+    restricted: profile.private || false,
   };
-
-  // Optional: Cache in D1 (uncomment for prod)
-  // await DB.prepare("INSERT OR REPLACE INTO instagram_cache (username, data, timestamp) VALUES (?, ?, ?)")
-  //   .bind(username, JSON.stringify(extracted), Date.now()).run();
 
   return createCorsResponse({ success: true, data: extracted }, 200, request);
 }
