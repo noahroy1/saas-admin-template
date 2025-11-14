@@ -2,7 +2,7 @@ import { validateApiTokenResponse } from "@/lib/api";
 
 // CORS headers constant for reuse
 const corsHeaders = (origin) => ({
-  'Access-Control-Allow-Origin': origin || '*',  // Echo request origin for precision
+  // Echo request origin for precision
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type',
   'Access-Control-Allow-Credentials': 'true',  // If auth evolves to cookies
