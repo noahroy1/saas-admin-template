@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type',
   'Access-Control-Allow-Credentials': 'true',  // If auth evolves to cookies
-  'Vary': 'Origin',
+  // 'Vary': 'Origin',
 };
 
 export async function OPTIONS() {
