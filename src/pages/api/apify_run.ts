@@ -43,19 +43,15 @@ export async function POST({ locals, request }) {
     });
   }
 
-  // Optimized Apify input: Minimal profile scrape, no posts (reverted to originals per schema)
+  // Optimized Apify input: Direct profile scrape via usernames array
   const apifyInput = {
-    search: username,
-    searchType: "user", // Confirmed valid per schema
-    searchLimit: 1, // Single match
-    resultsType: "details", // Confirmed valid per schema
-    resultsLimit: 1, // Skip posts to minimize time/cost
+    usernames: [username], // Array as per schema (singleton for now)
     proxy: { useApifyProxy: true }, // Anti-block essential
   };
 
-  // Step 1: Run the actor
+  // Step 1: Run the actor (profile-specific ID)
   const apifyResponse = await fetch(
-    "https://api.apify.com/v2/acts/apify~instagram-scraper/runs",
+    "https://api.apify.com/v2/acts/dSCLg0C3YEZ83HzYX/runs",
     {
       method: "POST",
       headers: {
@@ -77,11 +73,11 @@ export async function POST({ locals, request }) {
   const runData = await apifyResponse.json();
   const runId = runData.data.id;
 
-  // Step 2: Poll for completion (5s intervals, increased max to 5 mins for delays)
+  // Step 2: Poll for completion (10s intervals, max 5 mins to stay under subrequest limits)
   let status = "RUNNING";
-  let maxAttempts = 60; // Increased to handle variable scrape times
+  let maxAttempts = 30; // 30 × 10s = 300s, ~32 subrequests total <50 limit
   while (status === "RUNNING" && maxAttempts-- > 0) {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await new Promise((resolve) => setTimeout(resolve, 10000)); // Increased interval
     try {
       const statusRes = await fetch(
         `https://api.apify.com/v2/actor-runs/${runId}`,
@@ -120,13 +116,15 @@ export async function POST({ locals, request }) {
       return Response.json({ error: "No profile found for username" }, { status: 404, headers: jsonHeaders });
     }
 
-    // Step 4: Extract essentials (use HD pic for quality)
+    // Step 4: Extract essentials (updated for new fields; HD pic priority)
     const profile = results[0];
     const extracted = {
       username: profile.username,
       profilePicture: profile.profilePicUrlHD || profile.profilePicUrl, // Fallback to low-res
       followersCount: profile.followersCount,
-      restricted: profile.private || false, // Insight flag for partial data
+      restricted: profile.isPrivate || false, // Maps to private flag
+      verified: profile.isVerified || false, // New: Verified status
+      biography: profile.biography || "", // New: Bio text
     };
 
     // Optional: Cache in D1 (uncomment for prod)
