@@ -26,5 +26,9 @@ export default defineConfig({
         "react-dom/server": "react-dom/server.edge",
       },
     },
+    ssr: {
+      // This forces the Supabase client to be bundled instead of externalised
+      noExternal: ['@supabase/supabase-js'],
+    },
   },
 });
