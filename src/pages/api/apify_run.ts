@@ -10,14 +10,12 @@ const corsHeaders = {
 };
 
 const jsonHeaders = { ...corsHeaders, 'Content-Type': 'application/json' };
-const SUPABASE_URL = "https://vyiyzapirdkiateytpwo.supabase.co";
-
 export async function OPTIONS() {
   return new Response(null, { headers: corsHeaders });  // Handles preflight
 }
 
-// Image download + upload
-async function uploadProfilePicture(imageUrl: string, storagePath: string, env: Env) {
+const SUPABASE_URL = "https://vyiyzapirdkiateytpwo.supabase.co";
+export async function uploadProfilePicture(imageUrl: string, storagePath: string, env: Env) {
   // Create Supabase client on-the-fly (service_role key bypasses RLS – safe in Worker only)
   const supabase = createClient(SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
