@@ -1,5 +1,6 @@
 import { validateApiTokenResponse } from "@/lib/api";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.84.0';
+
 // CORS headers constant for reuse
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',  // for prod tighten
