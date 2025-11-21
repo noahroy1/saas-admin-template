@@ -23,7 +23,7 @@ export default defineConfig({
       },
     },
     ssr: {
-      noExternal: [/^@supabase\//],
+      noExternal: [/^@supabase\//],  // This is the key line — forces bundling of all Supabase packages
     },
   },
 });
