@@ -1,7 +1,5 @@
 import { validateApiTokenResponse } from "@/lib/api";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-// Create Supabase client
-const supabase = createClient("https://vyiyzapirdkiateytpwo.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5aXl6YXBpcmRraWF0ZXl0cHdvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MzU1OTQyNywiZXhwIjoyMDc5MTM1NDI3fQ.4MLBZ8qJK2ZDpsgQvvVpa3oNvl7UHjY6AOBY99mnb-g")
 
 // CORS headers constant for reuse
 const corsHeaders = {
@@ -12,11 +10,48 @@ const corsHeaders = {
 };
 
 const jsonHeaders = { ...corsHeaders, 'Content-Type': 'application/json' };
+const SUPABASE_URL = "https://vyiyzapirdkiateytpwo.supabase.co";
 
 export async function OPTIONS() {
   return new Response(null, { headers: corsHeaders });  // Handles preflight
 }
 
+// Image download + upload
+async function uploadProfilePicture(imageUrl: string, storagePath: string, env: Env) {
+  // Create Supabase client on-the-fly (service_role key bypasses RLS – safe in Worker only)
+  const supabase = createClient(SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+  // Download the image
+  const imageResponse = await fetch(imageUrl);
+
+  if (!imageResponse.ok || imageResponse.body === null) {
+    throw new Error(`Failed to download image: ${imageResponse.status} ${imageResponse.statusText}`);
+  }
+
+  const contentType = imageResponse.headers.get("content-type") ?? "image/jpeg";
+
+  // Stream directly, zero full buffering in memory
+  const { data, error } = await supabase.storage
+    .from("profile_pictures")
+    .upload(storagePath, imageResponse.body, {
+      contentType,
+      upsert: true,               // change to false if you don't want overwrite
+      duplex: "half",             // required when passing a ReadableStream in some runtimes
+    });
+
+  if (error) {
+    // Duplicate error is common on upsert – you can ignore it if you used upsert: true
+    if (error.message.includes("Duplicate")) {
+      console.log("File already exists (upsert succeeded)");
+      return;
+    }
+    throw error;
+  }
+
+  console.log("Upload successful", data);
+}
+
+// Main function
 export async function POST({ locals, request }) {
   const { API_TOKEN, APIFY_TOKEN } = locals.runtime.env;
 
@@ -121,25 +156,18 @@ export async function POST({ locals, request }) {
 
     // Step 4: Extract essentials (updated for new fields; HD pic priority)
     const profile = results[0];
+    
+    try {
+      await uploadProfilePicture(
+        profile.profilePicUrlHD || profile.profilePicUrl,   // imageUrl
+        `${username}_pfp.jpg`,           // storagePath inside the bucket
+        env                                 // passes your env with SUPABASE_URL & SUPABASE_SERVICE_ROLE_KEY
+      );
 
-    async fetch(request, env) {
-      const imageUrl = profile.profilePicUrlHD || profile.profilePicUrl;
-
-      const imageResponse = await fetch(imageUrl);
-      if (!imageResponse.ok) throw new Error("Failed to download image.");
-
-      const imageBlob = await imageResponse.blob();
-      const fileName = `${profile.username}_pfp`);
-
-      const { data, error } = await supabase.storage
-        .from("profile_pictures")
-        .upload(fileName, imageBlob, {
-          contentType: imageResponse.headers.get('content-type') || 'image/jpeg',
-          upsert: true,
-        });
-      if (error) throw error;
-      return new Response("Profile picture uploaded.");
-    }
+      return new Response("Profile picture uploaded successfully");
+    } catch (err: any) {
+      return new Response("Upload failed: " + err.message, { status: 500 });
+    };
     
     const extracted = {
       username: profile.username,
