@@ -1,4 +1,8 @@
 import { validateApiTokenResponse } from "@/lib/api";
+import { createClient } from "https://esm.sh/@supabase/supabase-js"
+
+// Create Supabase client
+const supabase = createClient("https://vyiyzapirdkiateytpwo.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5aXl6YXBpcmRraWF0ZXl0cHdvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM1NTk0MjcsImV4cCI6MjA3OTEzNTQyN30.0VwGD1QikxnfUWMThwmU5Z3gGgeUunquh-CtBUBaqZQ")
 
 // CORS headers constant for reuse
 const corsHeaders = {
@@ -75,9 +79,9 @@ export async function POST({ locals, request }) {
 
   // Step 2: Poll for completion (10s intervals, max 5 mins to stay under subrequest limits)
   let status = "RUNNING";
-  let maxAttempts = 30; // 30 × 10s = 300s, ~32 subrequests total <50 limit
+  let maxAttempts = 40; // 40 × 8s = 320s, ~42 subrequests total <50 limit
   while (status === "RUNNING" && maxAttempts-- > 0) {
-    await new Promise((resolve) => setTimeout(resolve, 10000)); // Increased interval
+    await new Promise((resolve) => setTimeout(resolve, 8000)); // Increased interval
     try {
       const statusRes = await fetch(
         `https://api.apify.com/v2/actor-runs/${runId}`,
