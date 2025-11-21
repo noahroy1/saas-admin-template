@@ -1,8 +1,7 @@
 import { validateApiTokenResponse } from "@/lib/api";
-import { createClient } from "https://esm.sh/@supabase/supabase-js"
-
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 // Create Supabase client
-const supabase = createClient("https://vyiyzapirdkiateytpwo.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5aXl6YXBpcmRraWF0ZXl0cHdvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM1NTk0MjcsImV4cCI6MjA3OTEzNTQyN30.0VwGD1QikxnfUWMThwmU5Z3gGgeUunquh-CtBUBaqZQ")
+const supabase = createClient("https://vyiyzapirdkiateytpwo.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5aXl6YXBpcmRraWF0ZXl0cHdvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MzU1OTQyNywiZXhwIjoyMDc5MTM1NDI3fQ.4MLBZ8qJK2ZDpsgQvvVpa3oNvl7UHjY6AOBY99mnb-g")
 
 // CORS headers constant for reuse
 const corsHeaders = {
@@ -122,14 +121,36 @@ export async function POST({ locals, request }) {
 
     // Step 4: Extract essentials (updated for new fields; HD pic priority)
     const profile = results[0];
+
+    export default {
+      async fetch(request, env) {
+        const imageUrl = profile.profilePicUrlHD || profile.profilePicUrl;
+
+        const imageResponse = await fetch(imageUrl);
+        if (!imageResponse.ok) throw new Error("Failed to download image.");
+
+        const imageBlob = await imageResponse.blob();
+        const fileName = `${profile.username}_pfp`);
+
+        const { data, error } = await supabase.storage
+          .from("profile_pictures")
+          .upload(fileName, imageBlob, {
+            contentType: imageResponse.headers.get('content-type') || 'image/jpeg',
+            upsert: true,
+          });
+        if (error) throw error;
+        return new Response("Profile picture uploaded.");
+      }
+    }
+    
     const extracted = {
       username: profile.username,
-      profilePicture: profile.profilePicUrlHD || profile.profilePicUrl, // Fallback to low-res
+      // profilePicture: profile.profilePicUrlHD || profile.profilePicUrl, // Fallback to low-res
       followersCount: profile.followersCount,
       restricted: profile.isPrivate || false, // Maps to private flag
       verified: profile.isVerified || false, // New: Verified status
       biography: profile.biography || "", // New: Bio text
-      relatedProfiles: profile.relatedProfiles || "",
+      // relatedProfiles: profile.relatedProfiles || "",
     };
 
     // Optional: Cache in D1 (uncomment for prod)
