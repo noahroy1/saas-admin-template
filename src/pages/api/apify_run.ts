@@ -1,5 +1,5 @@
 import { validateApiTokenResponse } from "@/lib/api";
-// import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 
 // CORS headers constant for reuse
 const corsHeaders = {
