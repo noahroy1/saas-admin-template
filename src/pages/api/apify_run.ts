@@ -122,25 +122,23 @@ export async function POST({ locals, request }) {
     // Step 4: Extract essentials (updated for new fields; HD pic priority)
     const profile = results[0];
 
-    export default {
-      async fetch(request, env) {
-        const imageUrl = profile.profilePicUrlHD || profile.profilePicUrl;
+    async fetch(request, env) {
+      const imageUrl = profile.profilePicUrlHD || profile.profilePicUrl;
 
-        const imageResponse = await fetch(imageUrl);
-        if (!imageResponse.ok) throw new Error("Failed to download image.");
+      const imageResponse = await fetch(imageUrl);
+      if (!imageResponse.ok) throw new Error("Failed to download image.");
 
-        const imageBlob = await imageResponse.blob();
-        const fileName = `${profile.username}_pfp`);
+      const imageBlob = await imageResponse.blob();
+      const fileName = `${profile.username}_pfp`);
 
-        const { data, error } = await supabase.storage
-          .from("profile_pictures")
-          .upload(fileName, imageBlob, {
-            contentType: imageResponse.headers.get('content-type') || 'image/jpeg',
-            upsert: true,
-          });
-        if (error) throw error;
-        return new Response("Profile picture uploaded.");
-      }
+      const { data, error } = await supabase.storage
+        .from("profile_pictures")
+        .upload(fileName, imageBlob, {
+          contentType: imageResponse.headers.get('content-type') || 'image/jpeg',
+          upsert: true,
+        });
+      if (error) throw error;
+      return new Response("Profile picture uploaded.");
     }
     
     const extracted = {
