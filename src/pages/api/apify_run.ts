@@ -125,6 +125,7 @@ export async function POST({ locals, request }) {
       restricted: profile.isPrivate || false, // Maps to private flag
       verified: profile.isVerified || false, // New: Verified status
       biography: profile.biography || "", // New: Bio text
+      relatedProfiles: profile.relatedProfiles || "",
     };
 
     // Optional: Cache in D1 (uncomment for prod)
