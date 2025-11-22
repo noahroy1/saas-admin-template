@@ -15,10 +15,10 @@ export async function OPTIONS() {
 }
 
 const SUPABASE_URL = "https://vyiyzapirdkiateytpwo.supabase.co";
-const supabase = createClient(SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
 export async function uploadProfilePicture(imageUrl: string, storagePath: string, env: Env) {
   // Create Supabase client on-the-fly (service_role key bypasses RLS – safe in Worker only)
+  const supabase = createClient(SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   // Download the image
   const imageResponse = await fetch(imageUrl);
 
@@ -172,14 +172,18 @@ export async function POST({ locals, request }) {
       console.error("Supabase upload error:", err);
     }
 
-    const { data: urlData } = supabase.storage
-      .from("profile_pictures")
-      .getPublicUrl(`${username}_pfp.jpg`);
-    const profilePictureStored = urlData.publicUrl;
+    export async function getProfilePicture(imagePath: string) {
+      const supabase = createClient(SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+      
+      const { data: urlData } = supabase.storage
+        .from("profile_pictures")
+        .getPublicUrl(imagePath)
+      return urlData.publicUrl;
+    }
     
     const extracted = {
       username: profile.username,
-      profilePicture: profilePictureStored,
+      profilePicture: getProfilePicture(`${username}_pfp.jpg`),
       followersCount: profile.followersCount,
       restricted: profile.isPrivate || false, // Maps to private flag
       verified: profile.isVerified || false, // New: Verified status
