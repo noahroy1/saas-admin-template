@@ -171,10 +171,17 @@ export async function POST({ locals, request }) {
       // We deliberately continue — the core data is still valid
       console.error("Supabase upload error:", err);
     }
+
+    // Get profile picture
+    const { data, error } = supabase.storage
+        .from("profile_pictures")
+        .getPublicUrl(`${username}_pfp.jpg`)
+    const profilePicture = data.publicUrl
+    if (error) throw error
     
     const extracted = {
       username: profile.username,
-      // profilePicture: profile.profilePicUrlHD || profile.profilePicUrl, // Fallback to low-res
+      profilePicture: profilePicture,
       followersCount: profile.followersCount,
       restricted: profile.isPrivate || false, // Maps to private flag
       verified: profile.isVerified || false, // New: Verified status
