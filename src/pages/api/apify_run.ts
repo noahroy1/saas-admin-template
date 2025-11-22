@@ -176,12 +176,12 @@ export async function POST({ locals, request }) {
     const { data, error } = supabase.storage
         .from("profile_pictures")
         .getPublicUrl(`${username}_pfp.jpg`)
-    const profilePictureStored = data.publicUrl
+    const profilePicture = data.publicUrl
     if (error) throw error
     
     const extracted = {
       username: profile.username,
-      profilePictureStored: profilePictureStored,
+      profilePicture: profilePicture,
       followersCount: profile.followersCount,
       restricted: profile.isPrivate || false, // Maps to private flag
       verified: profile.isVerified || false, // New: Verified status
