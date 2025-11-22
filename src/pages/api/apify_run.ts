@@ -152,20 +152,25 @@ export async function POST({ locals, request }) {
       return Response.json({ error: "No profile found for username" }, { status: 404, headers: jsonHeaders });
     }
 
-    // Step 4: Extract essentials (updated for new fields; HD pic priority)
+    // Step 4: Extract essentials + upload profile picture
     const profile = results[0];
+    
+    let uploadMessage = null;
+    let uploadSuccess = true;
     
     try {
       await uploadProfilePicture(
-        profile.profilePicUrlHD || profile.profilePicUrl,   // imageUrl
-        `${username}_pfp.jpg`,           // storagePath inside the bucket
-        env                                 // passes your env with SUPABASE_URL & SUPABASE_SERVICE_ROLE_KEY
+        profile.profilePicUrlHD || profile.profilePicUrl,
+        `${username}_pfp.jpg`,
+        locals.runtime.env   // ← fixed: was "env"
       );
-
-      return new Response("Profile picture uploaded successfully");
+      uploadMessage = "Profile picture uploaded successfully";
     } catch (err: any) {
-      return new Response("Upload failed: " + err.message, { status: 500 });
-    };
+      uploadSuccess = false;
+      uploadMessage = `Profile picture upload failed: ${err.message}`;
+      // We deliberately continue — the core data is still valid
+      console.error("Supabase upload error:", err);
+    }
     
     const extracted = {
       username: profile.username,
@@ -182,7 +187,7 @@ export async function POST({ locals, request }) {
     //   .bind(username, JSON.stringify(extracted), Date.now()).run();
 
     // In success return
-    return Response.json({ success: true, data: extracted }, { status: 200, headers: jsonHeaders });
+    return Response.json({ success: true, data: extracted, upload: { success: uploadSuccess, message: uploadMessage }}, { status: 200, headers: jsonHeaders });
   } catch (err) {
     return Response.json({ error: `Results processing error: ${err.message}` }, { status: 500, headers: jsonHeaders });
   }
