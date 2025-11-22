@@ -49,16 +49,6 @@ export async function uploadProfilePicture(imageUrl: string, storagePath: string
   console.log("Upload successful", data);
 }
 
-// Get profile picture
-export async function getProfilePicture(imagePath: string) {
-  const supabase = createClient(SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-      
-  const { data: urlData } = supabase.storage
-    .from("profile_pictures")
-    .getPublicUrl(imagePath)
-  return urlData.publicUrl;
-}
-
 // Main function
 export async function POST({ locals, request }) {
   const { API_TOKEN, APIFY_TOKEN } = locals.runtime.env;
@@ -181,12 +171,9 @@ export async function POST({ locals, request }) {
       // We deliberately continue — the core data is still valid
       console.error("Supabase upload error:", err);
     }
-
-    const profilePictureStored = await getProfilePicture(`${username}_pfp.jpg`);
     
     const extracted = {
       username: profile.username,
-      profilePicture: profilePictureStored,
       followersCount: profile.followersCount,
       restricted: profile.isPrivate || false, // Maps to private flag
       verified: profile.isVerified || false, // New: Verified status
