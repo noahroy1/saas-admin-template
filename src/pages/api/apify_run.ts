@@ -178,6 +178,7 @@ export async function POST({ locals, request }) {
       restricted: profile.isPrivate || false, // Maps to private flag
       verified: profile.isVerified || false, // New: Verified status
       biography: profile.biography || "", // New: Bio text
+      profilePicture: profile.profilePicUrlHD || profile.profilePicUrl,
       // relatedProfiles: profile.relatedProfiles || "",
     };
 
