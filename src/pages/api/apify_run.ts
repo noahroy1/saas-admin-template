@@ -49,6 +49,16 @@ export async function uploadProfilePicture(imageUrl: string, storagePath: string
   console.log("Upload successful", data);
 }
 
+// Get profile picture
+export async function getProfilePicture(imagePath: string) {
+  const supabase = createClient(SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+      
+  const { data: urlData } = supabase.storage
+    .from("profile_pictures")
+    .getPublicUrl(imagePath)
+  return urlData.publicUrl;
+}
+
 // Main function
 export async function POST({ locals, request }) {
   const { API_TOKEN, APIFY_TOKEN } = locals.runtime.env;
@@ -170,15 +180,6 @@ export async function POST({ locals, request }) {
       uploadMessage = `Profile picture upload failed: ${err.message}`;
       // We deliberately continue — the core data is still valid
       console.error("Supabase upload error:", err);
-    }
-
-    export async function getProfilePicture(imagePath: string) {
-      const supabase = createClient(SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-      
-      const { data: urlData } = supabase.storage
-        .from("profile_pictures")
-        .getPublicUrl(imagePath)
-      return urlData.publicUrl;
     }
 
     const profilePictureStored = await getProfilePicture(`${username}_pfp.jpg`);
