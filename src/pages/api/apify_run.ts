@@ -180,10 +180,12 @@ export async function POST({ locals, request }) {
         .getPublicUrl(imagePath)
       return urlData.publicUrl;
     }
+
+    const profilePictureStored = await getProfilePicture(`${username}_pfp.jpg`);
     
     const extracted = {
       username: profile.username,
-      profilePicture: getProfilePicture(`${username}_pfp.jpg`),
+      profilePicture: profilePictureStored,
       followersCount: profile.followersCount,
       restricted: profile.isPrivate || false, // Maps to private flag
       verified: profile.isVerified || false, // New: Verified status
