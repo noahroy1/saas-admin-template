@@ -176,7 +176,7 @@ export async function POST({ locals, request }) {
     const { data, error } = supabase.storage
         .from("profile_pictures")
         .getPublicUrl(`${username}_pfp.jpg`)
-    const profilePicture = data.publicUrl
+    const profilePictureStored = data.publicUrl
     if (error) throw error
     
     const extracted = {
