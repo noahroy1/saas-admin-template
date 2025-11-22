@@ -45,8 +45,15 @@ export async function uploadProfilePicture(imageUrl: string, storagePath: string
     }
     throw error;
   }
+  // Get profile picture
+    const { data, error } = supabase.storage
+        .from("profile_pictures")
+        .getPublicUrl(`${username}_pfp.jpg`)
+    const profilePicture = data.publicUrl
+    if (error) throw error
 
   console.log("Upload successful", data);
+  return profilePicture;
 }
 
 // Main function
@@ -171,13 +178,6 @@ export async function POST({ locals, request }) {
       // We deliberately continue — the core data is still valid
       console.error("Supabase upload error:", err);
     }
-
-    // Get profile picture
-    const { data, error } = supabase.storage
-        .from("profile_pictures")
-        .getPublicUrl(`${username}_pfp.jpg`)
-    const profilePicture = data.publicUrl
-    if (error) throw error
     
     const extracted = {
       username: profile.username,
