@@ -49,18 +49,6 @@ export async function uploadProfilePicture(imageUrl: string, storagePath: string
   console.log("Upload successful", data);
 }
 
-// Get profile picture from storage
-async function getProfilePicture(imagePath: string) {
-  // Supabase instance ad-hoc
-  const supabase = createClient(SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-
-  const { data, error } = await supabase.storage
-    .from("profile_pictures")
-    .getPublicUrl(imagePath);
-  
-  return data.publicUrl;
-}
-
 // Main function
 export async function POST({ locals, request }) {
   const { API_TOKEN, APIFY_TOKEN } = locals.runtime.env;
@@ -183,8 +171,6 @@ export async function POST({ locals, request }) {
       // We deliberately continue — the core data is still valid
       console.error("Supabase upload error:", err);
     }
-
-    const profilePictureStored = getProfilePicture(`${profile.username}_pfp.jpg`)
     
     const extracted = {
       username: profile.username,
@@ -192,8 +178,7 @@ export async function POST({ locals, request }) {
       restricted: profile.isPrivate || false, // Maps to private flag
       verified: profile.isVerified || false, // New: Verified status
       biography: profile.biography || "", // New: Bio text
-      profilePicture: profilePictureStored || "",
-      // profilePicture: profile.profilePicUrlHD || profile.profilePicUrl,
+      profilePicture: profile.profilePicUrlHD || profile.profilePicUrl,
       // relatedProfiles: profile.relatedProfiles || "",
     };
 
