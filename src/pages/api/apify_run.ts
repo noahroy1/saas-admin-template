@@ -179,7 +179,7 @@ export async function POST({ locals, request }) {
       verified: profile.isVerified || false, // New: Verified status
       biography: profile.biography || "", // New: Bio text
       profilePicture: profile.profilePicUrlHD || profile.profilePicUrl,
-      // relatedProfiles: profile.relatedProfiles || "",
+      relatedProfiles: profile.relatedProfiles || "",
     };
 
     // Optional: Cache in D1 (uncomment for prod)
