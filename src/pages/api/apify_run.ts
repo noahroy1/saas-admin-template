@@ -180,6 +180,7 @@ export async function POST({ locals, request }) {
       biography: profile.biography || "", // New: Bio text
       profilePicture: profile.profilePicUrlHD || profile.profilePicUrl,
       // relatedProfiles intentionally omitted here
+      externalUrl: profile.externalUrl || null,  // ← New: Cache the external link (null if missing)
     };
 
     const relatedAccounts = profile.relatedProfiles
