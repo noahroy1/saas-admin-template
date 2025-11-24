@@ -179,15 +179,19 @@ export async function POST({ locals, request }) {
       verified: profile.isVerified || false, // New: Verified status
       biography: profile.biography || "", // New: Bio text
       profilePicture: profile.profilePicUrlHD || profile.profilePicUrl,
-      relatedProfiles: profile.relatedProfiles || "",
+      // relatedProfiles intentionally omitted here
     };
+
+    const relatedAccounts = profile.relatedProfiles
+      ? { relatedAccounts: profile.relatedProfiles }
+      : { relatedAccounts: [] };
 
     // Optional: Cache in D1 (uncomment for prod)
     // await DB.prepare("INSERT OR REPLACE INTO instagram_cache (username, data, timestamp) VALUES (?, ?, ?)")
     //   .bind(username, JSON.stringify(extracted), Date.now()).run();
 
     // In success return
-    return Response.json({ success: true, data: extracted, upload: { success: uploadSuccess, message: uploadMessage }}, { status: 200, headers: jsonHeaders });
+    return Response.json({ success: true, data: extracted, relatedAccounts, upload: { success: uploadSuccess, message: uploadMessage }}, { status: 200, headers: jsonHeaders });
   } catch (err) {
     return Response.json({ error: `Results processing error: ${err.message}` }, { status: 500, headers: jsonHeaders });
   }
