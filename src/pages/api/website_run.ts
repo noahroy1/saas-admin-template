@@ -167,4 +167,34 @@ export async function POST({ locals, request }) {
   } catch (err) {
     return Response.json({ error: `Results processing error: ${err.message}` }, { status: 500, headers: jsonHeaders });
   }
+
+  // Auto-chain to concision if flagged
+  const url = new URL(request.url);
+  if (url.searchParams.get('autoConcise') === 'true') {
+    try {
+      const conciseRes = await fetch('https://saas-admin-template.noahroyy1.workers.dev/api/concise_run', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': request.headers.get('Authorization') || `Bearer ${API_TOKEN}`,
+        },
+        body: JSON.stringify({ scrapedData: aggregated }),
+      });
+
+      if (conciseRes.ok) {
+        const conciseData = await conciseRes.json();
+        if (conciseData.success) {
+          return Response.json({
+            success: true,
+            scrapedData: aggregated,
+            conciseData: conciseData.summary
+          }, { status: 200, headers: jsonHeaders });
+        }
+      }
+      console.warn('Auto-concise failed; returning scraped data');
+    } catch (chainErr) {
+      console.error('Chain error:', chainErr);
+    }
+  }
+  return Response.json({ success: true, data: aggregated }, { status: 200, headers: jsonHeaders });
 }
