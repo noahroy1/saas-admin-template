@@ -48,8 +48,8 @@ export async function POST({ locals, request }) {
   const apifyInput = {
     startUrls: [{ url: externalUrl }],
     proxy: { useApifyProxy: true },
-    maxCrawlPages: 10,  // ← Slimmed from 9999999 for MVP (adjust if needed)
-    maxCrawlDepth: 2,   // ← Reasonable for site trees
+    maxCrawlPages: 1,  // ← Slimmed from 9999999 for MVP (adjust if needed)
+    maxCrawlDepth: 0,   // ← Reasonable for site trees
     saveMarkdown: true,
     saveHtml: false,    // Skip HTML to reduce payload
     saveScreenshots: false,  // Skip for now (add if visual concision needed)
