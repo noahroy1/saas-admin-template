@@ -43,36 +43,36 @@ export async function POST({ locals, request }) {
     });
   }
 
-  // Optimized Apify input: Single start URL, limited pages for efficiency (business sites rarely need deep crawls)
-  // Defaults from your schema, but cap maxCrawlPages to 10 to avoid overload/costs
+  // Apify input (unchanged)
   const apifyInput = {
     startUrls: [{ url: externalUrl }],
     proxy: { useApifyProxy: true },
-    maxCrawlPages: 1,  // ← Slimmed from 9999999 for MVP (adjust if needed)
-    maxCrawlDepth: 0,   // ← Reasonable for site trees
+    maxCrawlPages: 1,
+    maxCrawlDepth: 0,
     saveMarkdown: true,
-    saveHtml: false,    // Skip HTML to reduce payload
-    saveScreenshots: false,  // Skip for now (add if visual concision needed)
+    saveHtml: false,
+    saveScreenshots: false,
     blockMedia: true,
     removeElementsCssSelector: "nav, footer, script, style, noscript, svg, img[src^='data:'], [role=\"alert\"], [role=\"banner\"], [role=\"dialog\"], [role=\"alertdialog\"], [role=\"region\"][aria-label*=\"skip\" i], [aria-modal=\"true\"]",
-    htmlTransformer: "readableText",  // Ensures clean text
-    // Other defaults: aggressivePrune: false, expandIframes: true, etc. (omitted for brevity; add if custom)
+    htmlTransformer: "readableText",
   };
 
-  // Step 1: Run the actor
+  // Step 1: Run actor (header auth only)
   const apifyResponse = await fetch(
-    "https://api.apify.com/v2/acts/apify~website-content-crawler/runs?token=" + APIFY_TOKEN,  // ← Token appended as per your link
+    "https://api.apify.com/v2/acts/apify~website-content-crawler/runs",
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${APIFY_TOKEN}`,  // ← Added; removed ?token=
       },
       body: JSON.stringify(apifyInput),
     }
   );
 
   if (!apifyResponse.ok) {
-    const errorData = await apifyResponse.json();
+    const errorData = await apifyResponse.json().catch(() => ({}));  // Safe parse
+    console.error("Apify run error:", errorData);  // ← Log for CF tail
     return Response.json(
       { error: errorData.error?.message || "Apify run failed" },
       { status: apifyResponse.status, headers: jsonHeaders }
@@ -81,59 +81,75 @@ export async function POST({ locals, request }) {
 
   const runData = await apifyResponse.json();
   const runId = runData.data.id;
+  console.log("Apify run started:", runId);  // ← Debug
 
-  // Step 2: Poll for completion (same as Instagram: 8s intervals, ~5 min max)
+  // Step 2: Poll (header only; remove ?token=)
   let status = "RUNNING";
-  let maxAttempts = 40;  // 40 × 8s = 320s
+  let maxAttempts = 40;
   while (status === "RUNNING" && maxAttempts-- > 0) {
     await new Promise((resolve) => setTimeout(resolve, 8000));
     try {
       const statusRes = await fetch(
-        `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_TOKEN}`,
+        `https://api.apify.com/v2/actor-runs/${runId}`,  // ← No ?token=
         {
           headers: { 
-            "Authorization": `Bearer ${APIFY_TOKEN}`,  // Fallback if token query param fails
+            "Authorization": `Bearer ${APIFY_TOKEN}`,
           },
         }
       );
       if (!statusRes.ok) {
+        const errData = await statusRes.json().catch(() => ({}));
+        console.error("Status poll error:", statusRes.status, errData);  // ← Log
         throw new Error(`Status check failed: ${statusRes.status}`);
       }
       const statusData = await statusRes.json();
       status = statusData.data.status;
+      console.log("Poll status:", status);  // ← Debug (runs ~5x typically)
     } catch (err) {
+      console.error("Polling error:", err);  // ← Log
       return Response.json({ error: `Polling error: ${err.message}` }, { status: 500, headers: jsonHeaders });
     }
   }
 
   if (status !== "SUCCEEDED") {
+    console.error("Run failed:", status);  // ← Log
     return Response.json({ error: `Run failed with status: ${status}` }, { status: 500, headers: jsonHeaders });
   }
 
-  // Step 3: Fetch results (dataset items)
+  // Step 3: Fetch results (header only)
   try {
+    const defaultDatasetId = runData.data.defaultDatasetId;
+    if (!defaultDatasetId) {
+      throw new Error("No defaultDatasetId in run response");  // ← Explicit check
+    }
+    console.log("Fetching dataset:", defaultDatasetId);  // ← Debug
+
     const resultsRes = await fetch(
-      `https://api.apify.com/v2/datasets/${runData.data.defaultDatasetId}/items?token=${APIFY_TOKEN}`,
+      `https://api.apify.com/v2/datasets/${defaultDatasetId}/items`,  // ← No ?token=
       {
         headers: { 
           "Authorization": `Bearer ${APIFY_TOKEN}`,
         },
       }
     );
+
     if (!resultsRes.ok) {
-      return Response.json({ error: `Failed to fetch results: ${resultsRes.status}` }, { status: 500, headers: jsonHeaders });
+      const errData = await resultsRes.json().catch(() => ({}));
+      console.error("Results fetch error:", resultsRes.status, errData);  // ← Log
+      return Response.json({ error: `Failed to fetch results: ${resultsRes.status} - ${errData.error?.message || 'Unknown'}` }, { status: 500, headers: jsonHeaders });
     }
+
     const results = await resultsRes.json();
+    console.log("Results count:", results?.length || 0);  // ← Debug
 
     if (!results || results.length === 0) {
+      console.warn("No pages scraped");  // ← Log
       return Response.json({ error: "No pages scraped from URL" }, { status: 404, headers: jsonHeaders });
     }
 
-    // Step 4: Extract essentials for OpenAI concision
-    // Focus: Primary page (depth 0) + summaries of others; aggregate text/markdown for prompt feeding
-    // Unnecessary fields (e.g., full crawl obj) omitted; cleaned for brevity
+    // Step 4: Extract (unchanged; structure matches docs)
     const extractedPages = results.map((page: any) => ({
-      url: page.url,
+      url: page.url || page['#url'] || '',  // ← Fallback for prefix (rare)
       loadedUrl: page.crawl?.loadedUrl || page.url,
       depth: page.crawl?.depth || 0,
       title: page.metadata?.title || "",
@@ -141,60 +157,27 @@ export async function POST({ locals, request }) {
       author: page.metadata?.author || null,
       keywords: page.metadata?.keywords || null,
       language: page.metadata?.languageCode || "en",
-      text: page.text || "",  // Cleaned readable text (ideal for concision)
-      markdown: page.markdown || "",  // Full structured content
-      screenshotUrl: page.screenshotUrl || null,  // If enabled later
+      text: page.text || page['#text'] || "",  // ← Fallback
+      markdown: page.markdown || page['#markdown'] || "",
+      screenshotUrl: page.screenshotUrl || null,
     }));
 
-    // Aggregate for easy OpenAI input: Concat primary text/markdown, with pages array for details
     const primaryPage = extractedPages.find((p: any) => p.depth === 0) || extractedPages[0];
-    const fullText = primaryPage.text;
-    const fullMarkdown = primaryPage.markdown;
     const aggregated = {
       inputUrl: externalUrl,
       pagesCount: extractedPages.length,
       primary: primaryPage,
-      allPages: extractedPages,  // Full array if multi-page analysis needed
-      // For OpenAI: Feed fullMarkdown or fullText directly into prompt
+      allPages: extractedPages,
     };
 
-    console.log(`Scraped ${extractedPages.length} pages from ${externalUrl}`);
+    console.log(`Scraped ${extractedPages.length} pages from ${externalUrl}`);  // ← Existing
 
     return Response.json({ 
       success: true, 
       data: aggregated 
     }, { status: 200, headers: jsonHeaders });
   } catch (err) {
+    console.error("Results processing error:", err);  // ← Enhanced log
     return Response.json({ error: `Results processing error: ${err.message}` }, { status: 500, headers: jsonHeaders });
   }
-
-  // Auto-chain to concision if flagged
-  const url = new URL(request.url);
-  if (url.searchParams.get('autoConcise') === 'true') {
-    try {
-      const conciseRes = await fetch('https://saas-admin-template.noahroyy1.workers.dev/api/concise_run', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': request.headers.get('Authorization') || `Bearer ${API_TOKEN}`,
-        },
-        body: JSON.stringify({ scrapedData: aggregated }),
-      });
-
-      if (conciseRes.ok) {
-        const conciseData = await conciseRes.json();
-        if (conciseData.success) {
-          return Response.json({
-            success: true,
-            scrapedData: aggregated,
-            conciseData: conciseData.summary
-          }, { status: 200, headers: jsonHeaders });
-        }
-      }
-      console.warn('Auto-concise failed; returning scraped data');
-    } catch (chainErr) {
-      console.error('Chain error:', chainErr);
-    }
-  }
-  return Response.json({ success: true, data: aggregated }, { status: 200, headers: jsonHeaders });
 }
