@@ -148,7 +148,7 @@ export async function POST({ locals, request }) {
     // Run 1: Profile + Recent Posts
     const postsInput = {
       search: username,
-      searchType: "profile",
+      searchType: "user",
       resultsType: "posts",
       resultsLimit: 7,  // Matches your sample
     };
@@ -163,7 +163,7 @@ export async function POST({ locals, request }) {
     try {
       const reelsInput = {
         search: username,
-        searchType: "profile",
+        searchType: "user",
         resultsType: "reels",
         resultsLimit: 3,  // As specified
       };
