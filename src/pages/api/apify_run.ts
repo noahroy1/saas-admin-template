@@ -87,7 +87,7 @@ export async function POST({ locals, request }) {
 
   // Step 1: Run the actor (profile-specific ID)
   const apifyResponse = await fetch(
-    "https://api.apify.com/v2/acts/dSCLg0C3YEZ83HzYX/runs",
+    "https://api.apify.com/v2/acts/apify~instagram-scraper/runs",
     {
       method: "POST",
       headers: {
