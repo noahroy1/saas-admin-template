@@ -105,7 +105,7 @@ export async function POST({ locals, request }) {
   if (status !== "SUCCEEDED") {
     // Graceful: Don't fail the chain; just set has_reels=false
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    await supabase.from("leads").update({ has_reels: false, reels: '[]'::jsonb, ER_avg: null }).eq('id', leadId);
+    await supabase.from("leads").update({ has_reels: false, reels: [], ER_avg: null }).eq('id', leadId);
     return Response.json({ success: false, error: `Run status: ${status}—reels skipped` }, { status: 200, headers: jsonHeaders });
   }
 
@@ -123,7 +123,7 @@ export async function POST({ locals, request }) {
     if (!results || results.length === 0) {
       // Graceful skip
       const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-      await supabase.from("leads").update({ has_reels: false, reels: '[]'::jsonb, ER_avg: null }).eq('id', leadId);
+      await supabase.from("leads").update({ has_reels: false, reels: [], ER_avg: null }).eq('id', leadId);
       return Response.json({ success: false, error: "No reels found—private or inactive?" }, { status: 200, headers: jsonHeaders });
     }
 
