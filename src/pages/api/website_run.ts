@@ -42,19 +42,22 @@ export async function POST({ locals, request }) {
       headers: jsonHeaders
     });
   }
+  const startUrl: string = externalUrl + "collections/";
+
+  // To add: if no '/collections', fallback to root
 
   // Apify input (unchanged)
   const apifyInput = {
-    startUrls: [{ url: externalUrl }],
+    startUrls: [{ url: startUrl }],
     proxy: { useApifyProxy: true },
-    maxCrawlPages: 1,
-    maxCrawlDepth: 0,
-    saveMarkdown: true,
+    maxCrawlPages: 2,
+    maxCrawlDepth: 1,
+    saveMarkdown: false,
     saveHtml: false,
     saveScreenshots: false,
     blockMedia: true,
     removeElementsCssSelector: "nav, footer, script, style, noscript, svg, img[src^='data:'], [role=\"alert\"], [role=\"banner\"], [role=\"dialog\"], [role=\"alertdialog\"], [role=\"region\"][aria-label*=\"skip\" i], [aria-modal=\"true\"]",
-    htmlTransformer: "readableText",
+    htmlTransformer: "none",
   };
 
   // Step 1: Run actor (header auth only)
@@ -148,6 +151,7 @@ export async function POST({ locals, request }) {
     }
 
     // Step 4: Extract (unchanged; structure matches docs)
+    // must determine what is actually required here ***
     const extractedPages = results.map((page: any) => ({
       url: page.url || page['#url'] || '',  // ← Fallback for prefix (rare)
       loadedUrl: page.crawl?.loadedUrl || page.url,
