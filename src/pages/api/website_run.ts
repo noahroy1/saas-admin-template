@@ -1,4 +1,5 @@
 import { validateApiTokenResponse } from "@/lib/api";
+import { createClient } from '@supabase/supabase-js';
 
 // CORS headers constant for reuse
 const corsHeaders = {
@@ -14,8 +15,10 @@ export async function OPTIONS() {
   return new Response(null, { headers: corsHeaders });  // Handles preflight
 }
 
+const SUPABASE_URL = "https://vyiyzapirdkiateytpwo.supabase.co";
+
 export async function POST({ locals, request }) {
-  const { API_TOKEN, APIFY_TOKEN } = locals.runtime.env;
+  const { API_TOKEN, APIFY_TOKEN, SUPABASE_SERVICE_ROLE_KEY } = locals.runtime.env;
 
   const invalidTokenResponse = await validateApiTokenResponse(request, API_TOKEN);
   if (invalidTokenResponse) {
@@ -35,13 +38,14 @@ export async function POST({ locals, request }) {
     });
   }
 
-  const { externalUrl } = body;
-  if (!externalUrl || typeof externalUrl !== "string") {
-    return new Response(JSON.stringify({ error: "Missing or invalid externalUrl" }), { 
+  const { externalUrl, leadId } = body;
+  if (!externalUrl || typeof externalUrl !== "string" || !leadId || typeof leadId !== "number") {
+    return new Response(JSON.stringify({ error: "Missing/invalid externalUrl or leadId" }), { 
       status: 400, 
       headers: jsonHeaders
     });
   }
+  
   const startUrl: string = externalUrl + "collections/";
 
   // To add: if no '/collections', fallback to root
@@ -76,10 +80,9 @@ export async function POST({ locals, request }) {
   if (!apifyResponse.ok) {
     const errorData = await apifyResponse.json().catch(() => ({}));  // Safe parse
     console.error("Apify run error:", errorData);  // ← Log for CF tail
-    return Response.json(
-      { error: errorData.error?.message || "Apify run failed" },
-      { status: apifyResponse.status, headers: jsonHeaders }
-    );
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
+    return Response.json({ success: false, error: errorData.error?.message || "Apify run failed - website skipped" }, { status: 200, headers: jsonHeaders } });
   }
 
   const runData = await apifyResponse.json();
@@ -116,7 +119,9 @@ export async function POST({ locals, request }) {
 
   if (status !== "SUCCEEDED") {
     console.error("Run failed:", status);  // ← Log
-    return Response.json({ error: `Run failed with status: ${status}` }, { status: 500, headers: jsonHeaders });
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
+    return Response.json({ success: false, error: `Run failed with status: ${status} - website skipped` }, { status: 200, headers: jsonHeaders });
   }
 
   // Step 3: Fetch results (header only)
@@ -139,7 +144,9 @@ export async function POST({ locals, request }) {
     if (!resultsRes.ok) {
       const errData = await resultsRes.json().catch(() => ({}));
       console.error("Results fetch error:", resultsRes.status, errData);  // ← Log
-      return Response.json({ error: `Failed to fetch results: ${resultsRes.status} - ${errData.error?.message || 'Unknown'}` }, { status: 500, headers: jsonHeaders });
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
+      return Response.json({ error: `Failed to fetch results: ${resultsRes.status}` }, { status: 500, headers: jsonHeaders });
     }
 
     const results = await resultsRes.json();
@@ -147,7 +154,9 @@ export async function POST({ locals, request }) {
 
     if (!results || results.length === 0) {
       console.warn("No pages scraped");  // ← Log
-      return Response.json({ error: "No pages scraped from URL" }, { status: 404, headers: jsonHeaders });
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
+      return Response.json({ error: `Failed to fetch results: ${resultsRes.status}` }, { status: 500, headers: jsonHeaders });
     }
 
     // Step 4: Extract (unchanged; structure matches docs)
@@ -167,7 +176,7 @@ export async function POST({ locals, request }) {
     }));
 
     const primaryPage = extractedPages.find((p: any) => p.depth === 0) || extractedPages[0];
-    const aggregated = {
+    const website_data = {
       inputUrl: externalUrl,
       pagesCount: extractedPages.length,
       primary: primaryPage,
@@ -176,12 +185,32 @@ export async function POST({ locals, request }) {
 
     console.log(`Scraped ${extractedPages.length} pages from ${externalUrl}`);  // ← Existing
 
+    // Step 5: Supabase UPSERT
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const { error: updateError } = await supabase
+      .from("leads")
+      .update({
+        website_data,
+        has_website: true
+      })
+      .eq('id', leadId);
+
+    if (updateError) {
+      console.error("Supabase update error:", updateError);
+      return Response.json({ error: `Cache failed: ${updateError.message}` }, { status: 500, headers: jsonHeaders });
+    }
+
+    console.log(`Cached website_data for lead ${leadId}: ${website_data.pageCount} pages`);
+    
     return Response.json({ 
       success: true, 
-      data: aggregated 
+      data: website_data,
+      leadId
     }, { status: 200, headers: jsonHeaders });
   } catch (err) {
     console.error("Results processing error:", err);  // ← Enhanced log
-    return Response.json({ error: `Results processing error: ${err.message}` }, { status: 500, headers: jsonHeaders });
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
+    return Response.json({ error: `Processing error: ${err.message}—website skipped` }, { status: 200, headers: jsonHeaders });
   }
 }
