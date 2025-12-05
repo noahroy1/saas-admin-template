@@ -24,6 +24,7 @@ export default defineConfig({
     },
     ssr: {
       noExternal: [/^@supabase\//],  // This is the key line — forces bundling of all Supabase packages
+      noExternal: [/^openai\//], // added to mimic what worked for SB
     },
   },
 });
