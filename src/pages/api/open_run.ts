@@ -4,7 +4,7 @@
 
 import { validateApiTokenResponse } from "@/lib/api";
 import { createClient } from '@supabase/supabase-js';
-import OpenAI from 'https://esm.sh/openai@4'; // ESM compat for Workers
+import OpenAI from 'openai'; // ESM compat for Workers
 
 // CORS (consistent with siblings)
 const corsHeaders = {
@@ -94,17 +94,19 @@ ${hasWebsite ? `Website (text from ${website_data.pagesCount} pages): ${website_
 Infer niche from bio/reels captions; prices from site shop text (catch "$X.XX" patterns); prioritize engagement for summary.`;
 
   // Step 3: OpenAI call
-  const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+  const openai = new OpenAI({
+    apiKey: OPENAI_API_KEY,  // Your env secret
+  });
   try {
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o-mini',  // Cheap/structured; docs: https://platform.openai.com/docs/models/gpt-4o-mini
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
+        { role: 'system', content: systemPrompt },  // Your schema enforcer
+        { role: 'user', content: userPrompt },      // Hydrated with profile/reels/website_data
       ],
-      response_format: { type: 'json_object' },
+      response_format: { type: 'json_object' },    // Locks to { summary: str, prices: str[], ... }
       temperature: 0.1,
-      max_tokens: 400,
+      max_tokens: 400,  // Keeps ~$0.0001/lead for AOV calcs
     });
 
     const responseContent = completion.choices[0]?.message?.content;
