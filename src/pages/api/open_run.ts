@@ -1,14 +1,14 @@
 // Cloudflare Worker: /api/oai_run.ts
-// Chains after website_run + reels_run: Fetches lead data, prompts gpt-5-nano, parses JSON, UPSERTs analysis to Supabase.
-// Trigger: In Dashboard.tsx addLead, after website/reels: fetch('/api/oai_run', { body: JSON.stringify({ leadId }) })
+// Chains after website_run + reels_run: Fetches lead, prompts gpt-4o-mini, parses JSON, UPSERTs {openai: analysis} to Supabase.
+// Trigger: FE button post-profile (e.g., "Qualify Lead" → fetch('/api/oai_run', { body: JSON.stringify({ leadId }) }))
 
 import { validateApiTokenResponse } from "@/lib/api";
 import { createClient } from '@supabase/supabase-js';
-import OpenAI from 'https://esm.sh/openai@4'; // Or pin to compat version
+import OpenAI from 'https://esm.sh/openai@4'; // ESM compat for Workers
 
-// CORS headers (reuse from others)
+// CORS (consistent with siblings)
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',  // Tighten for prod
+  'Access-Control-Allow-Origin': '*',  // Tighten to your Framer domain in prod
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type',
   'Vary': 'Origin',
@@ -51,11 +51,11 @@ export async function POST({ locals, request }) {
     });
   }
 
-  // Step 1: Fetch lead data from Supabase
+  // Step 1: Fetch lead (service role bypasses RLS)
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const { data: lead, error: fetchError } = await supabase
     .from("leads")
-    .select("raw_data, reels, website_data, ER_avg")
+    .select("raw_data, reels, website_data, ER_avg, openai")  // Include existing openai for idempotency
     .eq('id', leadId)
     .single();
 
@@ -63,69 +63,77 @@ export async function POST({ locals, request }) {
     return Response.json({ error: `Lead fetch failed: ${fetchError?.message || 'Not found'}` }, { status: 404, headers: jsonHeaders });
   }
 
-  const { raw_data: profile, reels, website_data, ER_avg } = lead;
-  if (!profile || !reels || !website_data) {
-    // Graceful: Skip if incomplete chain
-    await supabase.from("leads").update({ ai_analysis_complete: false }).eq('id', leadId);
-    return Response.json({ success: false, error: "Incomplete data—rerun chain" }, { status: 200, headers: jsonHeaders });
+  const { raw_data: profile, reels, website_data, ER_avg, openai: existingOpenai } = lead;
+  if (existingOpenai && Object.keys(existingOpenai).length > 0) {
+    // Idempotent: Already analyzed
+    return Response.json({ success: true, data: existingOpenai, leadId, cached: true }, { status: 200, headers: jsonHeaders });
   }
 
-  // Step 2: Hydrate prompt
-  const systemPrompt = `You are a lead qualification expert for e-commerce Instagram influencers. Analyze the provided profile, reels engagement, and website content. Extract:
-- summary: Concise 2-3 sentence overview of the brand/niche fit (e.g., "Fashion brand targeting Gen Z with sustainable apparel").
-- prices: Array of detected product prices (numbers only, e.g., [29.99, 49.99]; infer from text if explicit).
-- pricesLow: Array of low-end prices (e.g., sale/outlet items) or null if none.
-- niche: Single word or short phrase (e.g., "sustainable fashion").
-- otherContact: Any non-Instagram contacts (email/phone) or "none".
+  // Graceful if incomplete: Proceed with what's available (e.g., no website → prices=[])
+  const hasReels = !!reels && reels.length > 0;
+  const hasWebsite = !!website_data && website_data.pagesCount > 0;
+  if (!profile) {
+    await supabase.from("leads").update({ ai_analysis_complete: false, openai: { summary: null, prices: [], pricesLow: "", niche: null, otherContact: "" } }).eq('id', leadId);
+    return Response.json({ success: false, error: "No profile data—rerun apify_run first" }, { status: 200, headers: jsonHeaders });
+  }
 
-Respond ONLY with strict JSON: {"summary": "...", "prices": [num, ...], "pricesLow": [num, ...] | null, "niche": "...", "otherContact": "..."}. No extra text.`;
+  // Step 2: Hydrate prompt (refine later; focuses on e-comm signals)
+  const systemPrompt = `You are a lead qualification expert for Instagram e-commerce influencers. Analyze the profile bio/followers, reels engagement, and website text for brand fit. Extract precisely:
+- summary: 2-3 sentence overview (e.g., "Sustainable fashion brand targeting millennials via TikTok-style reels").
+- prices: Array of product prices as strings from site/bio (e.g., ["$29.99", "$49.99"]; infer/compare from HTML text; empty [] if none).
+- pricesLow: Array of discounted/low-end prices as strings (e.g., ["$19.99"]; "" if none detected).
+- niche: Short phrase (e.g., "eco-friendly apparel").
+- otherContact: Non-IG contacts (e.g., "hello@brand.com") or "".
+
+Respond ONLY with strict JSON: {"summary": "str", "prices": ["str", ...], "pricesLow": ["str", ...] | "", "niche": "str", "otherContact": "str"}. No extras.`;
 
   const userPrompt = `
-Profile: ${JSON.stringify(profile)} (bio: ${profile.biography}, followers: ${profile.followersCount}, verified: ${profile.verified}).
-Reels (top 2, ER: ${ER_avg}%): ${JSON.stringify(reels)}.
-Website (primary page text): ${website_data.primary?.text?.substring(0, 2000) || 'N/A'}...
-Full context: Infer pricing/niche from bio, captions implied in reels, and site content (e.g., shop pages).`;
+Profile: ${JSON.stringify(profile)} (bio: ${profile.biography || 'N/A'}, followers: ${profile.followersCount || 0}, verified: ${profile.verified || false}, externalUrl: ${profile.externalUrl || 'N/A'}).
+${hasReels ? `Reels (top ${reels.length}, ER_avg: ${ER_avg || 0}%): ${JSON.stringify(reels)}.` : 'No reels data.'}
+${hasWebsite ? `Website (text from ${website_data.pagesCount} pages): ${website_data.primary?.text?.substring(0, 1500) || website_data.allPages?.[0]?.text?.substring(0, 1500) || 'N/A'}...` : 'No website data.'}
+Infer niche from bio/reels captions; prices from site shop text (catch "$X.XX" patterns); prioritize engagement for summary.`;
 
-  // Step 3: Call OpenAI
+  // Step 3: OpenAI call
   const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
   try {
     const completion = await openai.chat.completions.create({
-      model: 'gpt-5-nano',  // Confirm/fallback to 'gpt-4o-mini'
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      response_format: { type: 'json_object' },  // Enforces JSON
-      temperature: 0.1,  // Low for structured output
-      max_tokens: 500,
+      response_format: { type: 'json_object' },
+      temperature: 0.1,
+      max_tokens: 400,
     });
 
     const responseContent = completion.choices[0]?.message?.content;
     if (!responseContent) {
-      throw new Error('No response from OpenAI');
+      throw new Error('Empty OpenAI response');
     }
 
-    // Step 4: Parse/validate JSON
+    // Step 4: Parse/validate (basic; add Zod lib if you want stricter)
     let analysis;
     try {
       analysis = JSON.parse(responseContent);
-      // Basic validation (add Zod if needed)
-      if (!analysis.summary || !Array.isArray(analysis.prices) || typeof analysis.niche !== 'string') {
-        throw new Error('Invalid schema');
+      if (typeof analysis.summary !== 'string' || 
+          !Array.isArray(analysis.prices) || 
+          (analysis.pricesLow !== "" && !Array.isArray(analysis.pricesLow)) || 
+          typeof analysis.niche !== 'string' || 
+          typeof analysis.otherContact !== 'string') {
+        throw new Error('Schema mismatch');
       }
+      // Coerce pricesLow to array if "" for consistency (or keep as-is)
+      if (analysis.pricesLow === "") analysis.pricesLow = [];
     } catch (parseErr) {
-      throw new Error(`JSON parse failed: ${parseErr.message}`);
+      throw new Error(`JSON parse/validation failed: ${parseErr.message}`);
     }
 
-    // Step 5: UPSERT to Supabase
+    // Step 5: UPSERT (unified openai col; mark complete)
     const { error: updateError } = await supabase
       .from("leads")
       .update({ 
-        summary: analysis.summary,
-        prices: analysis.prices,
-        pricesLow: analysis.pricesLow,
-        niche: analysis.niche,
-        otherContact: analysis.otherContact,
+        openai: analysis,  // Full object
         ai_analysis_complete: true 
       })
       .eq('id', leadId);
@@ -135,7 +143,7 @@ Full context: Infer pricing/niche from bio, captions implied in reels, and site 
       return Response.json({ error: `Cache failed: ${updateError.message}` }, { status: 500, headers: jsonHeaders });
     }
 
-    console.log(`AI analysis cached for lead ${leadId}: niche=${analysis.niche}`);
+    console.log(`AI analysis cached for lead ${leadId}: niche="${analysis.niche}", prices=${analysis.prices.length} items`);
 
     return Response.json({ 
       success: true, 
@@ -144,8 +152,9 @@ Full context: Infer pricing/niche from bio, captions implied in reels, and site 
     }, { status: 200, headers: jsonHeaders });
 
   } catch (err: any) {
-    // Graceful: Mark incomplete
-    await supabase.from("leads").update({ ai_analysis_complete: false }).eq('id', leadId);
-    return Response.json({ error: `AI processing error: ${err.message}` }, { status: 500, headers: jsonHeaders });
+    // Graceful fallback
+    const fallback = { summary: null, prices: [], pricesLow: [], niche: null, otherContact: "" };
+    await supabase.from("leads").update({ openai: fallback, ai_analysis_complete: false }).eq('id', leadId);
+    return Response.json({ error: `AI error: ${err.message}`, fallback }, { status: 500, headers: jsonHeaders });
   }
 }
