@@ -43,15 +43,15 @@ export async function POST({ locals, request }) {
     });
   }
 
-  const { leadId } = body;
-  if (!leadId || typeof leadId !== "string") {  // Changed: string, not number
-    return new Response(JSON.stringify({ error: "Missing/invalid leadId" }), { 
+  const { username, leadId } = body;
+  if (!username || typeof username !== "string" || !leadId || typeof leadId !== "string") {  // Changed: string, not number
+    return new Response(JSON.stringify({ error: "Missing/invalid username or leadId" }), { 
       status: 400, 
       headers: jsonHeaders 
     });
   }
 
-  // Apify Input: Per your sample—user reels feed, limit 2 recent (no hashtag; use "user" type implicitly via directUrls)
+  // Apify input: user reels feed, limit 2 recent
   const apifyInput = {
     directUrls: [`https://www.instagram.com/${username}/`],
     resultsLimit: 2,
@@ -61,24 +61,32 @@ export async function POST({ locals, request }) {
     proxy: { useApifyProxy: true },  // Anti-block
   };
 
-  // Step 1: Run the instagram-scraper actor
-  const apifyResponse = await fetch(
-    `https://api.apify.com/v2/acts/apify~instagram-scraper/runs?token=${APIFY_TOKEN}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(apifyInput),
-    }
-  );
+  let apifyResponse;
+  try {
+      apifyResponse = await fetch(
+      "https://api.apify.com/v2/acts/apify~instagram-scraper/runs",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${APIFY_TOKEN}`,
+        },
+        body: JSON.stringify(apifyInput),
+      }
+    );
+  } catch (fetchErr) {
+    console.error("Apify run fetch error:", fetchErr);
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    await supabase.from("leads").update({ has_reels: false, reels: [], er_avg: null }).eq('id', leadId);
+    return Response.json({ success: false, error: `Fetch failed: ${fetchErr.message}-reels skipped` }, { status: 200, headers: jsonHeaders });
+  }
 
   if (!apifyResponse.ok) {
-    const errorData = await apifyResponse.json();
-    return Response.json(
-      { error: errorData.error?.message || "Apify run failed" },
-      { status: apifyResponse.status, headers: jsonHeaders }
-    );
+    const errorData = await apifyResponse.json().catch(() => ({}));
+    console.error("Apify run error:", errorData);
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    await supabase.from("leads").update({ has_reels: false, reels: [], er_avg: null }).eq('id', leadId);
+    return Response.json({ success: false, error: errorData.error?.message || "Apify run failed-reels skipped" }, { status: 200, headers: jsonHeaders });
   }
 
   const runData = await apifyResponse.json();
@@ -91,90 +99,96 @@ export async function POST({ locals, request }) {
     await new Promise((resolve) => setTimeout(resolve, 8000));
     try {
       const statusRes = await fetch(
-        `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_TOKEN}`,
-        { headers: { "Authorization": `Bearer ${APIFY_TOKEN}` } }
+        `https://api.apify.com/v2/actor-runs/${runId}`,
+        { 
+          headers: { "Authorization": `Bearer ${APIFY_TOKEN}` } 
+        }
       );
       if (!statusRes.ok) throw new Error(`Status check failed: ${statusRes.status}`);
       const statusData = await statusRes.json();
       status = statusData.data.status;
     } catch (err) {
-      return Response.json({ error: `Polling error: ${err.message}` }, { status: 500, headers: jsonHeaders });
+      console.error("Polling error:", err);
+      status = "FAILED";
     }
   }
 
   if (status !== "SUCCEEDED") {
     // Graceful: Don't fail the chain; just set has_reels=false
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    await supabase.from("leads").update({ has_reels: false, reels: [], ER_avg: null }).eq('id', leadId);
+    await supabase.from("leads").update({ has_reels: false, reels: [], er_avg: null }).eq('id', leadId);
     return Response.json({ success: false, error: `Run status: ${status}—reels skipped` }, { status: 200, headers: jsonHeaders });
   }
 
   // Step 3: Fetch results (reels array)
+  let results;
   try {
     const resultsRes = await fetch(
-      `https://api.apify.com/v2/datasets/${runData.data.defaultDatasetId}/items?token=${APIFY_TOKEN}`,
-      { headers: { "Authorization": `Bearer ${APIFY_TOKEN}` } }
+      `https://api.apify.com/v2/datasets/${runData.data.defaultDatasetId}/items`,
+      { 
+        headers: { "Authorization": `Bearer ${APIFY_TOKEN}` } 
+      }
     );
     if (!resultsRes.ok) {
       throw new Error(`Results fetch failed: ${resultsRes.status}`);
     }
-    const results = await resultsRes.json();
-
-    if (!results || results.length === 0) {
-      // Graceful skip
-      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-      await supabase.from("leads").update({ has_reels: false, reels: [], ER_avg: null }).eq('id', leadId);
-      return Response.json({ success: false, error: "No reels found—private or inactive?" }, { status: 200, headers: jsonHeaders });
-    }
-
-    // Step 4: Extract & Compute (per your sample output; cap at 2)
-    const reels = results.slice(0, 2).map((reel: any) => {
-      const views = reel.videoPlayCount || 0;
-      const likes = reel.likesCount || 0;
-      const comments = reel.commentsCount || 0;
-      const ctr = views > 0 ? ((likes + comments) / views) * 100 : 0;  // ER proxy; round to 2 decimals later in UI
-
-      return {
-        id: reel.id,
-        url: reel.url,
-        ctr: Number(ctr.toFixed(2)),  // Pre-compute for cache
-        likesCount: likes,
-        commentsCount: comments,
-        videoPlayCount: views,
-        timestamp: reel.timestamp,  // ISO for sorting
-        // Extras if needed: caption, musicInfo, etc.—add to schema later
-      };
-    });
-
-    // Compute lead-level avg ER (simple mean; null if all zero)
-    const totalEngagement = reels.reduce((sum: number, r: any) => sum + r.likesCount + r.commentsCount, 0);
-    const totalViews = reels.reduce((sum: number, r: any) => sum + r.videoPlayCount, 0);
-    const ER_avg = totalViews > 0 ? Number(((totalEngagement / totalViews) * 100).toFixed(2)) : null;
-
-    // Step 5: Supabase UPSERT (update existing lead by id)
+    results = await resultsRes.json();
+  } catch (err) {
+    console.error("Results fetch error:", err);
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { error: updateError } = await supabase
-      .from("leads")
-      .update({ 
-        reels: reels,  // JSONB array
-        ER_avg,
-        has_reels: true 
-      })
-      .eq('id', leadId);
-
-    if (updateError) {
-      console.error("Supabase update error:", updateError);
-      return Response.json({ error: `Cache failed: ${updateError.message}` }, { status: 500, headers: jsonHeaders });
-    }
-
-    console.log(`Cached ${reels.length} reels for lead ${leadId}; ER_avg: ${ER_avg}%`);
-
-    return Response.json({ 
-      success: true, 
-      data: { reels, ER_avg },  // Echo for debug; optional
-      leadId  // For chain confirmation
-    }, { status: 200, headers: jsonHeaders });
-  } catch (err: any) {
-    return Response.json({ error: `Processing error: ${err.message}` }, { status: 500, headers: jsonHeaders });
+    await supabase.from("leads").update({ has_reels: false, reels: [], er_avg: null }).eq('id', leadId);
+    return Response.json({ success: false, error: `Results error: ${err.message}—reels skipped` }, { status: 200, headers: jsonHeaders });
   }
+
+  if (!results || results.length === 0) {
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    await supabase.from("leads").update({ has_reels: false, reels: [], er_avg: null }).eq('id', leadId);
+    return Response.json({ success: false, error: "No reels found—private or inactive?" }, { status: 200, headers: jsonHeaders });
+  }
+
+  // Step 4: Extract and Compute (cap at 2)
+  const reels = results.slice(0, 2).map((reel: any) => {
+    const views = reel.videoPlayCount || 0;
+    const likes = reel.likesCount || 0;
+    const comments = reel.commentsCount || 0;
+    const ctr = views > 0 ? ((likes + comments) / views) * 100 : 0;
+
+    return {
+      id: reel.id,
+      url: reel.url,
+      ctr: Number(ctr.toFixed(2)),
+      likesCount: likes,
+      commentsCount: comments,
+      videoPlayCount: views,
+      timestamp, reel.timestamp,
+    };
+  });
+
+  const totalEngagement = reels.reduce((sum: number, r: any) => sum + r.likesCount + r.commentsCount, 0);
+  const totalViews = reels.reduce((sum: number, r: any) => sum + r.videoPlayCount, 0);
+  const er_avg = totalViews > 0 ? Number(((totalEngagement / totalViews) * 100).toFixed(2)) : null;
+
+  // Step 5: Supabase UPSERT
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({
+      reels,
+      er_avg,
+      has_reels: true
+    })
+    .eq('id', leadId);
+
+  if (updateError) {
+    console.error("Supabase update error:", updateError);
+    return Response.json({ error: `Cache failed: ${updateError.message}` }, { status: 500, headers: jsonHeaders });
+  }
+
+  console.log(`Cached ${reels.length} reels for lead ${leadId}; ER_avg: ${er_avg%}`);
+
+  return Response.json({
+    success: true,
+    data: { reels, er_avg },
+    leadId
+  }, { status: 200, headers: jsonHeaders });
 }
