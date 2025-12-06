@@ -38,19 +38,21 @@ export async function POST({ locals, request }) {
     });
   }
 
-  const { leadId } = body;
-  if (!leadId || typeof leadId !== "string") {  // Changed: string, not number
-    return new Response(JSON.stringify({ error: "Missing/invalid leadId" }), { 
-      status: 400, 
-      headers: jsonHeaders 
-    });
+  const { externalUrl, leadId } = body;
+  if (!externalUrl || typeof externalUrl !== "string" || !leadId || typeof leadId !== "string") {
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
+    return Response.json({ success: false, error: "Missing/invalid externalUrl or leadId-website skipped" }, { status: 200, headers: jsonHeaders });
   }
+
+  // fix startUrl as: if `${externalUrl}/collections` returns 404, retry with only ${externalUrl}
   
-  const startUrl: string = externalUrl + "collections/";
+  let startUrl = externalUrl.endswith('/') ? externalUrl : externalUrl + '/';
+  if (!startUrl.includes('collections')) {
+    startUrl += 'collections/';
+  }
 
-  // To add: if no '/collections', fallback to root
-
-  // Apify input (unchanged)
+  // Apify input
   const apifyInput = {
     startUrls: [{ url: startUrl }],
     proxy: { useApifyProxy: true },
@@ -64,18 +66,27 @@ export async function POST({ locals, request }) {
     htmlTransformer: "none",
   };
 
-  // Step 1: Run actor (header auth only)
-  const apifyResponse = await fetch(
-    "https://api.apify.com/v2/acts/apify~website-content-crawler/runs",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${APIFY_TOKEN}`,  // ← Added; removed ?token=
-      },
-      body: JSON.stringify(apifyInput),
-    }
-  );
+  // Step 1: Run actor (Bearer)
+  let apifyResponse;
+  try {
+    apifyResponse = await fetch(
+      "https://api.apify.com/v2/acts/apify~website-content-crawler/runs",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${APIFY_TOKEN}`,  // ← Added; removed ?token=
+        },
+        body: JSON.stringify(apifyInput),
+      }
+    );
+  } catch (fetchErr) {
+    console.error("Apify run fetch error:", fetchErr);
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
+    return Response.json({ success: false, error: `Fetch failed: ${fetchErr.message}—website skipped` }, { status: 200, headers: jsonHeaders });
+  }
+  
 
   if (!apifyResponse.ok) {
     const errorData = await apifyResponse.json().catch(() => ({}));  // Safe parse
@@ -89,7 +100,7 @@ export async function POST({ locals, request }) {
   const runId = runData.data.id;
   console.log("Apify run started:", runId);  // ← Debug
 
-  // Step 2: Poll (header only; remove ?token=)
+  // Step 2: Poll (Bearer)
   let status = "RUNNING";
   let maxAttempts = 40;
   while (status === "RUNNING" && maxAttempts-- > 0) {
@@ -113,7 +124,7 @@ export async function POST({ locals, request }) {
       console.log("Poll status:", status);  // ← Debug (runs ~5x typically)
     } catch (err) {
       console.error("Polling error:", err);  // ← Log
-      return Response.json({ error: `Polling error: ${err.message}` }, { status: 500, headers: jsonHeaders });
+      status = "FAILED";
     }
   }
 
@@ -125,6 +136,7 @@ export async function POST({ locals, request }) {
   }
 
   // Step 3: Fetch results (header only)
+  let results;
   try {
     const defaultDatasetId = runData.data.defaultDatasetId;
     if (!defaultDatasetId) {
@@ -143,21 +155,25 @@ export async function POST({ locals, request }) {
 
     if (!resultsRes.ok) {
       const errData = await resultsRes.json().catch(() => ({}));
-      console.error("Results fetch error:", resultsRes.status, errData);  // ← Log
-      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-      await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
-      return Response.json({ error: `Failed to fetch results: ${resultsRes.status}` }, { status: 500, headers: jsonHeaders });
+      console.error("Results fetch error:", resultsRes.status, errData);
+      throw new Error(`Failed to fetch results: ${resultsRes.status} - ${errData.error?.message || "Unknown"}`);
     }
 
-    const results = await resultsRes.json();
-    console.log("Results count:", results?.length || 0);  // ← Debug
+    results = await resultsRes.json();
+    console.log("Results count:", results?.length || 0);
+  } catch (err) {
+    console.error("Results fetch error:", err);
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
+    return Response.json({ success: false, error: `Results error: ${err.message}—website skipped` }, { status: 200, headers: jsonHeaders });
+  }
 
-    if (!results || results.length === 0) {
-      console.warn("No pages scraped");  // ← Log
-      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-      await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
-      return Response.json({ error: `Failed to fetch results: ${resultsRes.status}` }, { status: 500, headers: jsonHeaders });
-    }
+  if (!results || results.length === 0) {
+    console.warn("No pages scraped");
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
+    return Response.json({ success: false, error: "No pages scraped—website skipped" }, { status: 200, headers: jsonHeaders });
+  }
 
     // Step 4: Extract (unchanged; structure matches docs)
     // must determine what is actually required here ***
@@ -207,10 +223,5 @@ export async function POST({ locals, request }) {
       data: website_data,
       leadId
     }, { status: 200, headers: jsonHeaders });
-  } catch (err) {
-    console.error("Results processing error:", err);  // ← Enhanced log
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
-    return Response.json({ error: `Processing error: ${err.message}—website skipped` }, { status: 200, headers: jsonHeaders });
   }
 }
