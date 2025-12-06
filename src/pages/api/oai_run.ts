@@ -63,9 +63,8 @@ export async function POST({ locals, request }) {
     return Response.json({ error: `Lead fetch failed: ${fetchError?.message || 'Not found'}` }, { status: 404, headers: jsonHeaders });
   }
 
-  const { raw_data: profile, reels, website_data, ER_avg, openai: existingOpenai } = lead;
+  const { raw_data: profile, reels, website_data, er_avg, openai: existingOpenai } = lead;
   if (existingOpenai && Object.keys(existingOpenai).length > 0) {
-    // Idempotent: Already analyzed
     return Response.json({ success: true, data: existingOpenai, leadId, cached: true }, { status: 200, headers: jsonHeaders });
   }
 
@@ -94,19 +93,18 @@ ${hasWebsite ? `Website (text from ${website_data.pagesCount} pages): ${website_
 Infer niche from bio/reels captions; prices from site shop text (catch "$X.XX" patterns); prioritize engagement for summary.`;
 
   // Step 3: OpenAI call
-  const openai = new OpenAI({
-    apiKey: OPENAI_API_KEY,  // Your env secret
-  });
+  let analysis;
   try {
+    const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',  // Cheap/structured; docs: https://platform.openai.com/docs/models/gpt-4o-mini
+      model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: systemPrompt },  // Your schema enforcer
-        { role: 'user', content: userPrompt },      // Hydrated with profile/reels/website_data
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
       ],
-      response_format: { type: 'json_object' },    // Locks to { summary: str, prices: str[], ... }
+      response_format: { type: 'json_object' },
       temperature: 0.1,
-      max_tokens: 400,  // Keeps ~$0.0001/lead for AOV calcs
+      max_tokens: 400,
     });
 
     const responseContent = completion.choices[0]?.message?.content;
@@ -114,49 +112,41 @@ Infer niche from bio/reels captions; prices from site shop text (catch "$X.XX" p
       throw new Error('Empty OpenAI response');
     }
 
-    // Step 4: Parse/validate (basic; add Zod lib if you want stricter)
-    let analysis;
-    try {
-      analysis = JSON.parse(responseContent);
-      if (typeof analysis.summary !== 'string' || 
-          !Array.isArray(analysis.prices) || 
-          (analysis.pricesLow !== "" && !Array.isArray(analysis.pricesLow)) || 
-          typeof analysis.niche !== 'string' || 
-          typeof analysis.otherContact !== 'string') {
-        throw new Error('Schema mismatch');
-      }
-      // Coerce pricesLow to array if "" for consistency (or keep as-is)
-      if (analysis.pricesLow === "") analysis.pricesLow = [];
-    } catch (parseErr) {
-      throw new Error(`JSON parse/validation failed: ${parseErr.message}`);
+    analysis = JSON.parse(responseContent);
+    if (typeof analysis.summary !== 'string' ||
+        !Array.isArray(analysis.prices) ||
+        (analysis.pricesLow !== "" && !Array.isArray(analysis.pricesLow)) ||
+        typeof analysis.niche !== 'string' ||
+        typeof analysis.otherContact !== 'string') {
+      throw new Error('Schema mismatch');
     }
-
-    // Step 5: UPSERT (unified openai col; mark complete)
-    const { error: updateError } = await supabase
-      .from("leads")
-      .update({ 
-        openai: analysis,  // Full object
-        ai_analysis_complete: true 
-      })
-      .eq('id', leadId);
-
-    if (updateError) {
-      console.error("Supabase update error:", updateError);
-      return Response.json({ error: `Cache failed: ${updateError.message}` }, { status: 500, headers: jsonHeaders });
-    }
-
-    console.log(`AI analysis cached for lead ${leadId}: niche="${analysis.niche}", prices=${analysis.prices.length} items`);
-
-    return Response.json({ 
-      success: true, 
-      data: analysis, 
-      leadId 
-    }, { status: 200, headers: jsonHeaders });
-
+    if (analysis.pricesLow === "") analysis.pricesLow = [];
   } catch (err: any) {
-    // Graceful fallback
+    console.error("OpenAI error:", err);
     const fallback = { summary: null, prices: [], pricesLow: [], niche: null, otherContact: "" };
     await supabase.from("leads").update({ openai: fallback, ai_analysis_complete: false }).eq('id', leadId);
-    return Response.json({ error: `AI error: ${err.message}`, fallback }, { status: 500, headers: jsonHeaders });
+    return Response.json({ success: false, error: `AI error: ${err.message}-analysis skipped`, data: fallback }, { status: 200, headers: jsonHeaders });
   }
+
+  // Step 4: UPSERT
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({
+      openai: analysis,
+      ai_analysis_complete: true
+    })
+    .eq('id', leadId);
+
+  if (updateError) {
+    console.error("Supabase update error:", updateError);
+    return Response.json({ error: `Cache failed: ${updateError.message}` }, { status: 500, headers: jsonHeaders });
+  }
+
+  console.log(`AI analysis cached for lead ${leadId}: niche="${analysis.niche}", prices=${analysis.prices.length} items`);
+
+  return Response.json({
+    success: true,
+    data: analysis,
+    leadId
+  }, { status: 200, headers: jsonHeaders });
 }
