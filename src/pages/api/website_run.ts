@@ -45,12 +45,32 @@ export async function POST({ locals, request }) {
     return Response.json({ success: false, error: "Missing/invalid externalUrl or leadId-website skipped" }, { status: 200, headers: jsonHeaders });
   }
 
-  // fix startUrl as: if `${externalUrl}/collections` returns 404, retry with only ${externalUrl}
-  
-  let startUrl = externalUrl.endswith('/') ? externalUrl : externalUrl + '/';
-  if (!startUrl.includes('collections')) {
+  // Normalize externalUrl
+  let normalizedUrl = externalUrl.trim();
+  if (!normalizedUrl.startsWith('http')) {
+    normalizedUrl = 'https://' + normalizedUrl;
+  }
+
+  // startUrl with fallback retry logic
+  let startUrl = normalizedUrl.endsWith('/') ? normalizedUrl : normalizedUrl + '/';
+  let useCollections = true;
+  if (!startUrl.includes('collections') && !startUrl.includes('shop') && !startUrl.includes('products')) {
     startUrl += 'collections/';
   }
+  
+  // Quick HEAD check: If /collections 404, fallback to root (1 retry max)
+  try {
+    const headRes = await fetch(startUrl, { method: 'HEAD' });
+    if (!headRes.ok) {
+      console.log(`/collections 404 for ${startUrl}; fallback to root`);
+      startUrl = normalizedUrl + '/';
+      useCollections = false;
+    }
+  } catch (headErr) {
+    console.warn("HEAD check failed; proceeding with /collections:", headErr);
+  }
+
+  console.log(`Crawling: ${startUrl} (collections: ${useCollections})`);
 
   // Apify input
   const apifyInput = {
@@ -107,7 +127,7 @@ export async function POST({ locals, request }) {
     await new Promise((resolve) => setTimeout(resolve, 8000));
     try {
       const statusRes = await fetch(
-        `https://api.apify.com/v2/actor-runs/${runId}`,  // ← No ?token=
+        `https://api.apify.com/v2/actor-runs/${runId}`,
         {
           headers: { 
             "Authorization": `Bearer ${APIFY_TOKEN}`,
@@ -216,11 +236,11 @@ export async function POST({ locals, request }) {
     return Response.json({ error: `Cache failed: ${updateError.message}` }, { status: 500, headers: jsonHeaders });
   }
 
-  console.log(`Cached website_data for lead ${leadId}: ${website_data.pageCount} pages`);
+  console.log(`Cached website_data for lead ${leadId}: ${website_data.pagesCount} pages`);
     
   return Response.json({ 
     success: true, 
     data: website_data,
     leadId
   }, { status: 200, headers: jsonHeaders });
-} // ad-hoc to rebuild
+}
