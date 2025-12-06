@@ -82,7 +82,7 @@ export async function POST({ locals, request }) {
     console.error("Apify run error:", errorData);  // ← Log for CF tail
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     await supabase.from("leads").update({ has_website: false, website_data: null }).eq('id', leadId);
-    return Response.json({ success: false, error: errorData.error?.message || "Apify run failed - website skipped" }, { status: 200, headers: jsonHeaders } });
+    return Response.json({ success: false, error: errorData.error?.message || "Apify run failed - website skipped" }, { status: 200, headers: jsonHeaders });
   }
 
   const runData = await apifyResponse.json();
