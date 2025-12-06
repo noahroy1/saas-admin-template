@@ -38,11 +38,11 @@ export async function POST({ locals, request }) {
     });
   }
 
-  const { externalUrl, leadId } = body;
-  if (!externalUrl || typeof externalUrl !== "string" || !leadId || typeof leadId !== "number") {
-    return new Response(JSON.stringify({ error: "Missing/invalid externalUrl or leadId" }), { 
+  const { leadId } = body;
+  if (!leadId || typeof leadId !== "string") {  // Changed: string, not number
+    return new Response(JSON.stringify({ error: "Missing/invalid leadId" }), { 
       status: 400, 
-      headers: jsonHeaders
+      headers: jsonHeaders 
     });
   }
   
