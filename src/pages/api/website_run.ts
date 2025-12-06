@@ -177,51 +177,50 @@ export async function POST({ locals, request }) {
 
     // Step 4: Extract (unchanged; structure matches docs)
     // must determine what is actually required here ***
-    const extractedPages = results.map((page: any) => ({
-      url: page.url || page['#url'] || '',  // ← Fallback for prefix (rare)
-      loadedUrl: page.crawl?.loadedUrl || page.url,
-      depth: page.crawl?.depth || 0,
-      title: page.metadata?.title || "",
-      description: page.metadata?.description || "",
-      author: page.metadata?.author || null,
-      keywords: page.metadata?.keywords || null,
-      language: page.metadata?.languageCode || "en",
-      text: page.text || page['#text'] || "",  // ← Fallback
-      markdown: page.markdown || page['#markdown'] || "",
-      screenshotUrl: page.screenshotUrl || null,
-    }));
+  const extractedPages = results.map((page: any) => ({
+    url: page.url || page['#url'] || '',  // ← Fallback for prefix (rare)
+    loadedUrl: page.crawl?.loadedUrl || page.url,
+    depth: page.crawl?.depth || 0,
+    title: page.metadata?.title || "",
+    description: page.metadata?.description || "",
+    author: page.metadata?.author || null,
+    keywords: page.metadata?.keywords || null,
+    language: page.metadata?.languageCode || "en",
+    text: page.text || page['#text'] || "",  // ← Fallback
+    markdown: page.markdown || page['#markdown'] || "",
+    screenshotUrl: page.screenshotUrl || null,
+  }));
 
-    const primaryPage = extractedPages.find((p: any) => p.depth === 0) || extractedPages[0];
-    const website_data = {
-      inputUrl: externalUrl,
-      pagesCount: extractedPages.length,
-      primary: primaryPage,
-      allPages: extractedPages,
-    };
+  const primaryPage = extractedPages.find((p: any) => p.depth === 0) || extractedPages[0];
+  const website_data = {
+    inputUrl: externalUrl,
+    pagesCount: extractedPages.length,
+    primary: primaryPage,
+    allPages: extractedPages,
+  };
 
-    console.log(`Scraped ${extractedPages.length} pages from ${externalUrl}`);  // ← Existing
+  console.log(`Scraped ${extractedPages.length} pages from ${externalUrl}`);  // ← Existing
 
     // Step 5: Supabase UPSERT
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { error: updateError } = await supabase
-      .from("leads")
-      .update({
-        website_data,
-        has_website: true
-      })
-      .eq('id', leadId);
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({
+      website_data,
+      has_website: true
+    })
+    .eq('id', leadId);
 
-    if (updateError) {
-      console.error("Supabase update error:", updateError);
-      return Response.json({ error: `Cache failed: ${updateError.message}` }, { status: 500, headers: jsonHeaders });
-    }
-
-    console.log(`Cached website_data for lead ${leadId}: ${website_data.pageCount} pages`);
-    
-    return Response.json({ 
-      success: true, 
-      data: website_data,
-      leadId
-    }, { status: 200, headers: jsonHeaders });
+  if (updateError) {
+    console.error("Supabase update error:", updateError);
+    return Response.json({ error: `Cache failed: ${updateError.message}` }, { status: 500, headers: jsonHeaders });
   }
+
+  console.log(`Cached website_data for lead ${leadId}: ${website_data.pageCount} pages`);
+    
+  return Response.json({ 
+    success: true, 
+    data: website_data,
+    leadId
+  }, { status: 200, headers: jsonHeaders });
 }
