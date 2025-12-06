@@ -55,7 +55,7 @@ export async function POST({ locals, request }) {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const { data: lead, error: fetchError } = await supabase
     .from("leads")
-    .select("raw_data, reels, website_data, ER_avg, openai")  // Include existing openai for idempotency
+    .select("raw_data, reels, website_data, er_avg, openai")  // Include existing openai for idempotency
     .eq('id', leadId)
     .single();
 
@@ -88,7 +88,7 @@ Respond ONLY with strict JSON: {"summary": "str", "prices": ["str", ...], "price
 
   const userPrompt = `
 Profile: ${JSON.stringify(profile)} (bio: ${profile.biography || 'N/A'}, followers: ${profile.followersCount || 0}, verified: ${profile.verified || false}, externalUrl: ${profile.externalUrl || 'N/A'}).
-${hasReels ? `Reels (top ${reels.length}, ER_avg: ${ER_avg || 0}%): ${JSON.stringify(reels)}.` : 'No reels data.'}
+${hasReels ? `Reels (top ${reels.length}, er_avg: ${er_avg || 0}%): ${JSON.stringify(reels)}.` : 'No reels data.'}
 ${hasWebsite ? `Website (text from ${website_data.pagesCount} pages): ${website_data.primary?.text?.substring(0, 1500) || website_data.allPages?.[0]?.text?.substring(0, 1500) || 'N/A'}...` : 'No website data.'}
 Infer niche from bio/reels captions; prices from site shop text (catch "$X.XX" patterns); prioritize engagement for summary.`;
 
