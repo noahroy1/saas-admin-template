@@ -44,7 +44,7 @@ export async function POST({ locals, request }) {
   }
 
   const { leadId } = body;
-  if (!leadId || typeof leadId !== "number") {
+  if (!leadId || typeof leadId !== "string") {  // Changed: string, not number
     return new Response(JSON.stringify({ error: "Missing/invalid leadId" }), { 
       status: 400, 
       headers: jsonHeaders 
