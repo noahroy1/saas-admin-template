@@ -43,9 +43,9 @@ export async function POST({ locals, request }) {
     });
   }
 
-  const { username, leadId } = body;
-  if (!username || typeof username !== "string" || !leadId || typeof leadId !== "number") {
-    return new Response(JSON.stringify({ error: "Missing/invalid username or leadId" }), { 
+  const { leadId } = body;
+  if (!leadId || typeof leadId !== "string") {  // Changed: string, not number
+    return new Response(JSON.stringify({ error: "Missing/invalid leadId" }), { 
       status: 400, 
       headers: jsonHeaders 
     });
