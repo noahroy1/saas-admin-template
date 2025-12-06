@@ -160,7 +160,7 @@ export async function POST({ locals, request }) {
       likesCount: likes,
       commentsCount: comments,
       videoPlayCount: views,
-      timestamp, reel.timestamp,
+      timestamp: reel.timestamp,
     };
   });
 
