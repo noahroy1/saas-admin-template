@@ -184,7 +184,7 @@ export async function POST({ locals, request }) {
     return Response.json({ error: `Cache failed: ${updateError.message}` }, { status: 500, headers: jsonHeaders });
   }
 
-  console.log(`Cached ${reels.length} reels for lead ${leadId}; ER_avg: ${er_avg%}`);
+  console.log(`Cached ${reels.length} reels for lead ${leadId}; ER_avg: ${er_avg}%`);
 
   return Response.json({
     success: true,
